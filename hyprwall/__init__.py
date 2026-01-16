@@ -5,4 +5,5 @@ __all__ = [
     "hypr",
     "detect",
     "paths",
+    "optimize",
 ]

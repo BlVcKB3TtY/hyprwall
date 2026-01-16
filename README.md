@@ -31,6 +31,9 @@ Unlike heavier "wallpaper engines", HyprWall is designed with a focus on:
 - **Multi-format support** — Images and video wallpapers
 - **Intelligent mode selection** — Automatic aspect ratio detection (images → cover, videos → fit)
 - **Flexible rendering modes** — fit (letterbox), cover (crop), stretch (distort)
+- **Smart optimization** — Automatic video encoding with three performance profiles
+- **Intelligent caching** — Content-based fingerprinting avoids redundant re-encoding
+- **Resolution-aware** — Automatically scales to your monitor's native resolution
 - **Multi-monitor aware** — Automatic detection via `hyprctl`
 - **Directory support** — Automatically uses the most recent file from a directory
 - **Safe process handling** — Kills stale mpvpaper instances, avoids PID reuse bugs
@@ -43,6 +46,7 @@ Unlike heavier "wallpaper engines", HyprWall is designed with a focus on:
 - [Hyprland](https://hyprland.org/) — Wayland compositor
 - [mpvpaper](https://github.com/GhostNaN/mpvpaper) — Video wallpaper tool
 - [mpv](https://mpv.io/) — Media player
+- [ffmpeg](https://ffmpeg.org/) — Video encoding and optimization
 - Python ≥ 3.10
 
 ### Optional
@@ -98,6 +102,30 @@ hyprwall set file.jpg --mode stretch  # fill screen, distort
 | `cover` | Fill screen, crop if needed |
 | `stretch` | Fill screen, distort |
 
+### Optimization Profiles
+
+HyprWall automatically optimizes wallpapers for performance and battery life using ffmpeg:
+
+```bash
+hyprwall set file.mp4 --profile balanced  # default
+hyprwall set file.mp4 --profile eco       # maximum battery savings
+hyprwall set file.mp4 --profile quality   # best visual quality
+hyprwall set file.mp4 --profile off       # no optimization, use source
+```
+
+| Profile | FPS | Codec | CRF | Preset | Use Case |
+|---------|-----|-------|-----|--------|----------|
+| `eco` | 24 | H.264 | 28 | veryfast | Maximum battery life, lower quality |
+| `balanced` | 30 | H.264 | 24 | veryfast | Good balance (default) |
+| `quality` | 30 | H.264 | 20 | fast | Best visual quality, higher CPU usage |
+| `off` | — | — | — | — | Use source file directly (no re-encoding) |
+
+**How it works:**
+- Videos are automatically re-encoded to your monitor's native resolution
+- Static images are converted to 2-second looped videos for consistent playback
+- Optimized files are cached using content-based fingerprinting
+- Cache avoids redundant re-encoding when using the same file with identical settings
+
 ### Status & Control
 
 #### Check Status
@@ -124,13 +152,21 @@ hyprwall stop
 
 ### Cache Management
 
+HyprWall caches optimized wallpapers to avoid redundant re-encoding:
+
 ```bash
-# View cache information
+# View cache size
 hyprwall cache
 
 # Clear cache
 hyprwall cache clear
 ```
+
+**Cache behavior:**
+- Each unique combination of source file, resolution, and profile gets a unique cache key
+- Cache keys use SHA-256 fingerprints based on file path, size, modification time, and encoding settings
+- Optimized files are stored in `~/.cache/hyprwall/optimized/`
+- Changing source files or encoding settings automatically triggers re-encoding
 
 ## Documentation
 

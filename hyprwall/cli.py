@@ -8,6 +8,7 @@ import hyprwall.detect as detect
 
 from hyprwall import runner
 from hyprwall import hypr
+from hyprwall import optimize
 
 def print_banner():
     if shutil.which("figlet"):
@@ -36,6 +37,12 @@ def parse_arguments():
         choices=["auto", "fit", "cover", "stretch"],
         default="auto",
         help="Rendering mode: auto (image->cover, video->fit), fit (letterbox), cover (crop), stretch (distort).",
+    )
+    set_cmd.add_argument(
+        "--profile",
+        choices=["eco", "balanced", "quality", "off"],
+        default="balanced",
+        help="Optimization profile. Use 'off' to use the source file directly.",
     )
 
     # Status commands parser
@@ -99,11 +106,35 @@ def main():
                 print(f"Using monitor: {monitor}")
                 print(f"Selected file: {valid_path}")
                 print(f"Mode: {args.mode}")
+                print(f"Profile: {args.profile}")
+
+            # Resolve monitor resolution (needed for optimization)
+            w, h = hypr.monitor_resolution(monitor)
+
+            file_to_play = valid_path
+            if args.profile != "off":
+                prof = {
+                    "eco": optimize.ECO,
+                    "balanced": optimize.BALANCED,
+                    "quality": optimize.QUALITY,
+                }[args.profile]
+
+                file_to_play = optimize.ensure_optimized(
+                    valid_path,
+                    width=w,
+                    height=h,
+                    profile=prof,
+                    mode=args.mode,
+                    verbose=args.verbose,
+                )
+
+                if args.verbose:
+                    print(f"Optimized file: {file_to_play}")
 
             runner.stop()
             state = runner.start(
-                monitor,
-                valid_path,
+                monitor=monitor,
+                file=file_to_play,
                 extra_args=[],
                 mode=args.mode,
             )
