@@ -25,6 +25,7 @@ class RunState:
     pgid: int
     monitor: str
     file: str
+    needle: str
     mode: str
     started_at: float
 
@@ -38,6 +39,7 @@ def _read_state() -> RunState | None:
             file=str(data.get("file", "")),
             mode=str(data.get("mode", "auto")),
             started_at=float(data.get("started_at", 0.0)),
+            needle=str(data.get("needle") or data.get("file", "")),
         )
     except (FileNotFoundError, ValueError, KeyError, json.JSONDecodeError):
         return None
@@ -53,6 +55,7 @@ def _write_state(state: RunState) -> None:
                 "file": state.file,
                 "mode": state.mode,
                 "started_at": state.started_at,
+                "needle": state.needle,
             },
             indent=2,
         )
@@ -88,47 +91,78 @@ def _cmdline_contains(pid: int, needle: str) -> bool:
 def _is_mpvpaper(pid: int) -> bool:
     return _process_exists(pid) and _cmdline_contains(pid, "mpvpaper")
 
+def _pgid_has_processes(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
 def _terminate_group(pgid: int, timeout_s: float = 2.0, poll_s: float = 0.05) -> None:
     try:
         os.killpg(pgid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    except PermissionError:
+    except (ProcessLookupError, PermissionError):
         return
 
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
+        if not _pgid_has_processes(pgid):
+            return
         time.sleep(poll_s)
 
     try:
         os.killpg(pgid, signal.SIGKILL)
-    except ProcessLookupError:
-        return
-    except PermissionError:
+    except (ProcessLookupError, PermissionError):
         return
 
-def stop(timeout_s: float = 2.0) -> None:
+def stop(timeout_s: float = 2.0) -> bool:
     state = _read_state()
+
+    # No state: nothing we can precisely target
     if state is None:
-        return
+        return False
 
-    if not _process_exists(state.pid):
-        _remove_statefile()
-        return
-
-    if not _is_mpvpaper(state.pid):
-        _remove_statefile()
-        return
-
-    try:
+    # Best effort: try killing stored pgid/pid if they exist
+    if _process_exists(state.pid) and _is_mpvpaper(state.pid):
         _terminate_group(state.pgid, timeout_s=timeout_s)
-    finally:
         try:
-            os.kill(state.pid, signal.SIGTERM)
+            os.kill(state.pid, signal.SIGKILL)
         except Exception:
             pass
 
-        _remove_statefile()
+    # Robust verification: look for a remaining mpvpaper matching monitor + needle
+    monitor = state.monitor
+    needle = getattr(state, "needle", "") or state.file
+
+    pids = _find_mpvpaper_pids(monitor=monitor, needle=needle)
+    if not pids:
+        # If needle match fails (maybe file changed), fallback to monitor-only
+        pids = _find_mpvpaper_pids(monitor=monitor, needle="")
+
+    if pids:
+        # Kill them (TERM -> KILL)
+        for pid in pids:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except Exception:
+                pass
+        time.sleep(0.1)
+        for pid in pids:
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGKILL)
+            except Exception:
+                pass
+
+        # Recheck
+        still = _find_mpvpaper_pids(monitor=monitor, needle=needle) or _find_mpvpaper_pids(monitor=monitor, needle="")
+        if still:
+            # Do NOT remove state, because wallpaper is still running
+            return False
+
+    _remove_statefile()
+    return True
 
 def _is_image(file: Path) -> bool:
     return file.suffix.lower() in IMAGE_EXTS
@@ -182,6 +216,25 @@ def _mpv_options_for(
 
     return " ".join(opts)
 
+def _find_mpvpaper_pids(monitor: str = "", needle: str = "") -> list[int]:
+    pids: list[int] = []
+    for d in Path("/proc").iterdir():
+        if not d.name.isdigit():
+            continue
+        pid = int(d.name)
+        try:
+            txt = (d / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="ignore")
+        except Exception:
+            continue
+        if "mpvpaper" not in txt:
+            continue
+        if monitor and f" {monitor} " not in f" {txt} ":
+            continue
+        if needle and needle not in txt:
+            continue
+        pids.append(pid)
+    return pids
+
 def start(
     monitor: str,
     file: Path,
@@ -228,11 +281,14 @@ def start(
     except Exception:
         pgid = proc.pid
 
+    needle = str(file)
+
     state = RunState(
         pid=proc.pid,
         pgid=pgid,
         monitor=monitor,
         file=str(file),
+        needle=needle,
         mode=str(effective_mode),
         started_at=time.time(),
     )
@@ -240,20 +296,6 @@ def start(
     return state
 
 def status() -> dict:
-    """
-    Return a dictionary with the current runner status.
-    Keys:
-    - running: bool
-    - pid: int | None
-    - pgid: int | None
-    - monitor: str | None
-    - file: str | None
-    - exists: bool | None
-    - is_mpvpaper: bool | None
-    - started_at: float | None
-    - state_file: str
-    - log_file: str
-    """
     state = _read_state()
     if state is None:
         return {"running": False, "reason": "no state file"}
@@ -261,12 +303,20 @@ def status() -> dict:
     exists = _process_exists(state.pid)
     is_mpv = _is_mpvpaper(state.pid) if exists else False
 
+    running = bool(exists and is_mpv)
+    if not running:
+        running = bool(
+            _find_mpvpaper_pids(monitor=state.monitor, needle=state.needle) or
+            _find_mpvpaper_pids(monitor=state.monitor, needle="")
+        )
+
     return {
-        "running": bool(exists and is_mpv),
+        "running": running,
         "pid": state.pid,
         "pgid": state.pgid,
         "monitor": state.monitor,
         "file": state.file,
+        "needle": state.needle,
         "exists": exists,
         "is_mpvpaper": is_mpv,
         "started_at": state.started_at,

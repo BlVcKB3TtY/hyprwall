@@ -6,7 +6,7 @@ STATE_DIR = CACHE_DIR / "state"
 
 OPT_DIR = CACHE_DIR / "optimized"
 STATE_FILE = STATE_DIR / "state.json"
-LOG_FILE = STATE_DIR / "hyprwall.log"
+LOG_FILE = CACHE_DIR / "hyprwall.log"
 
 def ensure_directories():
     for d in (CONFIG_DIR, CACHE_DIR, STATE_DIR, OPT_DIR):

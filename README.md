@@ -110,21 +110,48 @@ HyprWall automatically optimizes wallpapers for performance and battery life usi
 hyprwall set file.mp4 --profile balanced  # default
 hyprwall set file.mp4 --profile eco       # maximum battery savings
 hyprwall set file.mp4 --profile quality   # best visual quality
+hyprwall set file.mp4 --profile av1-eco   # hardware-accelerated AV1 (AMD only)
 hyprwall set file.mp4 --profile off       # no optimization, use source
 ```
 
-| Profile | FPS | Codec | CRF | Preset | Use Case |
-|---------|-----|-------|-----|--------|----------|
-| `eco` | 24 | H.264 | 28 | veryfast | Maximum battery life, lower quality |
-| `balanced` | 30 | H.264 | 24 | veryfast | Good balance (default) |
-| `quality` | 30 | H.264 | 20 | fast | Best visual quality, higher CPU usage |
-| `off` | — | — | — | — | Use source file directly (no re-encoding) |
+| Profile | FPS | Codec | CRF | Use Case |
+|---------|-----|-------|-----|----------|
+| `eco` | 24 | H.264 | 28 | Maximum battery life, lower quality |
+| `balanced` | 30 | H.264 | 24 | Good balance (default) |
+| `quality` | 30 | H.264 | 20 | Best visual quality |
+| `av1-eco` | 24 | AV1 (VAAPI) | 28 | Hardware-accelerated encoding (AMD GPUs) |
+| `off` | — | — | — | Use source file directly (no re-encoding) |
 
 **How it works:**
 - Videos are automatically re-encoded to your monitor's native resolution
 - Static images are converted to 2-second looped videos for consistent playback
 - Optimized files are cached using content-based fingerprinting
 - Cache avoids redundant re-encoding when using the same file with identical settings
+
+### Hardware Acceleration
+
+HyprWall supports hardware-accelerated encoding for improved performance:
+
+```bash
+# Automatic encoder selection (default)
+hyprwall set file.mp4 --encoder auto
+
+# Force CPU encoding (libx264)
+hyprwall set file.mp4 --encoder cpu
+
+# Force NVIDIA NVENC (if available)
+hyprwall set file.mp4 --encoder nvenc
+
+# Force VAAPI (AMD/Intel, AV1 only)
+hyprwall set file.mp4 --profile av1-eco --encoder vaapi
+```
+
+**Encoder support by codec:**
+- **H.264**: CPU (libx264) or NVENC
+- **VP9**: CPU only (libvpx-vp9)
+- **AV1**: VAAPI only (AMD Radeon 780M and similar)
+
+**Note:** VAAPI H.264 encoding is **not supported** on AMD Radeon 780M due to hardware limitations. Use `av1-eco` profile with VAAPI for hardware acceleration on AMD GPUs.
 
 ### Status & Control
 
