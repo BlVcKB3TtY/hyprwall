@@ -18,8 +18,7 @@ Encoder = Literal["auto", "cpu", "vaapi", "nvenc"]
 class OptimizeProfile:
     name: str
     fps: int
-    codec: Codec
-    crf: int
+    quality: int  # CRF/QP value
     preset: str
 
 @dataclass(frozen=True)
@@ -31,10 +30,9 @@ class OptimizeResult:
     chosen: Encoder
     used: Encoder
 
-ECO = OptimizeProfile(name="eco", fps=24, codec="h264", crf=28, preset="veryfast")
-BALANCED = OptimizeProfile(name="balanced", fps=30, codec="h264", crf=24, preset="veryfast")
-QUALITY = OptimizeProfile(name="quality", fps=30, codec="h264", crf=20, preset="fast")
-AV1_ECO = OptimizeProfile(name="av1-eco", fps=24, codec="av1", crf=28, preset="unused")
+ECO = OptimizeProfile(name="eco", fps=24, quality=28, preset="veryfast")
+BALANCED = OptimizeProfile(name="balanced", fps=30, quality=24, preset="veryfast")
+QUALITY = OptimizeProfile(name="quality", fps=30, quality=20, preset="fast")
 
 # Codec → allowed encoders mapping (reflects real hardware capabilities)
 CODEC_ENCODERS: dict[Codec, list[Encoder]] = {
@@ -60,6 +58,7 @@ def cache_key(
     height: int,
     profile: OptimizeProfile,
     mode: str,
+    codec: Codec,
     encoder: Encoder,
 ) -> str:
     payload = {
@@ -67,8 +66,8 @@ def cache_key(
         "w": width,
         "h": height,
         "fps": profile.fps,
-        "codec": profile.codec,
-        "crf": profile.crf,
+        "codec": codec,
+        "quality": profile.quality,
         "preset": profile.preset,
         "enc": encoder,
     }
@@ -117,7 +116,11 @@ def pick_encoder(requested: Encoder, codec: Codec) -> Encoder:
     # Explicit request: validate against allowed encoders
     if requested in ("cpu", "vaapi", "nvenc"):
         if requested not in allowed:
-            raise RuntimeError(f"{requested.upper()} not supported for {codec.upper()}")
+            allowed_str = ", ".join(allowed)
+            raise RuntimeError(
+                f"{requested.upper()} encoder not supported for {codec.upper()} codec. "
+                f"Supported encoders for {codec.upper()}: {allowed_str}"
+            )
         return requested
 
     # Auto mode: select best available encoder for this codec
@@ -137,8 +140,10 @@ def pick_encoder(requested: Encoder, codec: Codec) -> Encoder:
     elif codec == "av1":
         if "vaapi" in allowed and _has_av1_vaapi(enc_txt):
             return "vaapi"
-        raise RuntimeError("AV1 requires VAAPI hardware support (not available)")
-    else:  # vp9
+        raise RuntimeError("AV1 codec requires VAAPI hardware support (not available on this system)")
+    elif codec == "vp9":
+        return "cpu"
+    else:
         return "cpu"
 
 def _build_vf(width: int, height: int, fps: int) -> str:
@@ -159,21 +164,21 @@ def _run(cmd: list[str]) -> None:
     except KeyboardInterrupt:
         raise RuntimeError("Encoding interrupted by user.")
 
-def _encode_h264_cpu(src: Path, dst: Path, vf: str, crf: int, preset: str) -> None:
+def _encode_h264_cpu(src: Path, dst: Path, vf: str, quality: int, preset: str) -> None:
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
         "-i", str(src),
         "-an",
         "-vf", vf,
         "-c:v", "libx264",
-        "-crf", str(crf),
+        "-crf", str(quality),
         "-preset", preset,
         "-pix_fmt", "yuv420p",
         str(dst),
     ]
     _run(cmd)
 
-def _encode_h264_nvenc(src: Path, dst: Path, vf: str, cq: int) -> None:
+def _encode_h264_nvenc(src: Path, dst: Path, vf: str, quality: int) -> None:
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
         "-i", str(src),
@@ -181,20 +186,20 @@ def _encode_h264_nvenc(src: Path, dst: Path, vf: str, cq: int) -> None:
         "-vf", vf,
         "-c:v", "h264_nvenc",
         "-preset", "p4",
-        "-cq", str(cq),
+        "-cq", str(quality),
         "-pix_fmt", "yuv420p",
         str(dst),
     ]
     _run(cmd)
 
-def _encode_vp9_cpu(src: Path, dst: Path, vf: str, crf: int) -> None:
+def _encode_vp9_cpu(src: Path, dst: Path, vf: str, quality: int) -> None:
     cmd = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
         "-i", str(src),
         "-an",
         "-vf", vf,
         "-c:v", "libvpx-vp9",
-        "-crf", str(crf),
+        "-crf", str(quality),
         "-b:v", "0",
         str(dst),
     ]
@@ -226,6 +231,7 @@ def ensure_optimized(
     height: int,
     profile: OptimizeProfile,
     mode: str,
+    codec: Codec,
     encoder: Encoder = "auto",
     verbose: bool = False,
 ) -> OptimizeResult:
@@ -243,13 +249,13 @@ def ensure_optimized(
         raise RuntimeError("ffmpeg not found in PATH. Install it to enable optimization.")
 
     requested = encoder
-    chosen = pick_encoder(requested, profile.codec)
+    chosen = pick_encoder(requested, codec)
 
     if verbose:
-        print(f"[encode] codec={profile.codec} requested={requested} chosen={chosen}")
+        print(f"[encode] codec={codec} requested={requested} chosen={chosen}")
 
-    key = cache_key(source, width, height, profile, mode, chosen)
-    dst = optimized_path(key, profile.codec)
+    key = cache_key(source, width, height, profile, mode, codec, chosen)
+    dst = optimized_path(key, codec)
     dst.parent.mkdir(parents=True, exist_ok=True)
 
     # Cache hit
@@ -281,12 +287,12 @@ def ensure_optimized(
             "-vf", vf,
         ]
 
-        if profile.codec == "h264":
-            cmd += ["-c:v", "libx264", "-crf", str(profile.crf), "-preset", profile.preset, "-pix_fmt", "yuv420p"]
-        elif profile.codec == "av1":
-            cmd += ["-c:v", "libaom-av1", "-crf", str(profile.crf), "-b:v", "0"]
+        if codec == "h264":
+            cmd += ["-c:v", "libx264", "-crf", str(profile.quality), "-preset", profile.preset, "-pix_fmt", "yuv420p"]
+        elif codec == "av1":
+            cmd += ["-c:v", "libaom-av1", "-crf", str(profile.quality), "-b:v", "0"]
         else:  # vp9
-            cmd += ["-c:v", "libvpx-vp9", "-crf", str(profile.crf), "-b:v", "0"]
+            cmd += ["-c:v", "libvpx-vp9", "-crf", str(profile.quality), "-b:v", "0"]
 
         cmd += [str(tmp)]
         _run(cmd)
@@ -305,18 +311,18 @@ def ensure_optimized(
     vf = _build_vf(width, height, profile.fps)
 
     try:
-        if profile.codec == "h264":
+        if codec == "h264":
             if chosen == "nvenc":
-                _encode_h264_nvenc(source, tmp, vf, cq=profile.crf)
+                _encode_h264_nvenc(source, tmp, vf, quality=profile.quality)
             else:  # cpu
-                _encode_h264_cpu(source, tmp, vf, profile.crf, profile.preset)
+                _encode_h264_cpu(source, tmp, vf, profile.quality, profile.preset)
 
-        elif profile.codec == "av1":
+        elif codec == "av1":
             # AV1 always uses VAAPI (pick_encoder enforces this)
-            _encode_av1_vaapi(source, tmp, width, height, profile.fps, quality=profile.crf)
+            _encode_av1_vaapi(source, tmp, width, height, profile.fps, quality=profile.quality)
 
-        else:  # vp9
-            _encode_vp9_cpu(source, tmp, vf, profile.crf)
+        elif codec == "vp9":
+            _encode_vp9_cpu(source, tmp, vf, profile.quality)
 
         tmp.replace(dst)
 

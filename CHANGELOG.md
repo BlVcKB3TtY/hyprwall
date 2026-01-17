@@ -1,9 +1,50 @@
 # Changelog
 
+## v0.2.1 (2026-01-17)
+
+### Changed
+- **BREAKING: Profile/Codec/Encoder Separation** — Refactored optimization architecture for clarity and flexibility
+  - `--profile` now only defines optimization level (eco/balanced/quality/off)
+  - `--codec` is now a separate argument (h264/av1/vp9)
+  - `--encoder` remains independent (auto/cpu/vaapi/nvenc)
+  - **Removed `av1` profile** — Use `--profile eco --codec av1 --encoder vaapi` instead
+- **Improved Error Messages** — Clear, actionable error messages when codec/encoder combinations are invalid
+- **Updated TLDR Command** — Comprehensive documentation with new profile/codec/encoder structure
+
+### Technical Details
+- `OptimizeProfile` dataclass no longer contains `codec` field
+- `crf` parameter renamed to `quality` for consistency across codecs
+- `ensure_optimized()` now requires explicit `codec` parameter
+- `cache_key()` includes codec as separate parameter (not from profile)
+- Cache keys remain backward-compatible (different structure = new cache entry)
+
+### Migration Guide
+**Old command:**
+```bash
+hyprwall set video.mp4 --profile av1
+```
+
+**New command:**
+```bash
+hyprwall set video.mp4 --profile eco --codec av1 --encoder vaapi
+```
+
+**Default behavior (unchanged):**
+- Profile: `balanced` (30fps, quality 24)
+- Codec: `h264` (MP4 output)
+- Encoder: `auto` (smart selection)
+
+### Benefits
+- **Clearer separation**: Profile = level, Codec = format, Encoder = backend
+- **More flexibility**: Use eco/balanced/quality with any codec
+- **Better errors**: Explicit messages with supported options
+- **Easier to extend**: Adding codecs/encoders is now straightforward
+
 ## v0.2.0 (2026-01-16)
 
 ### Added
 - **Smart Optimization System** — Automatic video encoding with four performance profiles (eco, balanced, quality, av1-eco)
+  - **Note**: `av1-eco` profile was replaced in v0.2.1 with `--codec av1` argument
 - **Hardware Acceleration Support** — NVENC and VAAPI encoder support with automatic detection
 - **AV1 VAAPI Encoding** — Hardware-accelerated AV1 encoding for AMD GPUs (Radeon 780M and similar)
 - **Intelligent Caching** — Content-based fingerprinting to avoid redundant re-encoding

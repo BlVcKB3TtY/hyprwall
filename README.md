@@ -104,23 +104,51 @@ hyprwall set file.jpg --mode stretch  # fill screen, distort
 
 ### Optimization Profiles
 
-HyprWall automatically optimizes wallpapers for performance and battery life using ffmpeg:
+HyprWall automatically optimizes wallpapers for performance and battery life using ffmpeg.
+
+#### Profiles (Optimization Level)
+
+Profiles define the FPS and quality level, independent of codec choice:
 
 ```bash
 hyprwall set file.mp4 --profile balanced  # default
 hyprwall set file.mp4 --profile eco       # maximum battery savings
 hyprwall set file.mp4 --profile quality   # best visual quality
-hyprwall set file.mp4 --profile av1-eco   # hardware-accelerated AV1 (AMD only)
 hyprwall set file.mp4 --profile off       # no optimization, use source
 ```
 
-| Profile | FPS | Codec | CRF | Use Case |
-|---------|-----|-------|-----|----------|
-| `eco` | 24 | H.264 | 28 | Maximum battery life, lower quality |
-| `balanced` | 30 | H.264 | 24 | Good balance (default) |
-| `quality` | 30 | H.264 | 20 | Best visual quality |
-| `av1-eco` | 24 | AV1 (VAAPI) | 28 | Hardware-accelerated encoding (AMD GPUs) |
+| Profile | FPS | Quality (CRF/QP) | Preset | Use Case |
+|---------|-----|------------------|--------|----------|
+| `eco` | 24 | 28 | veryfast | Maximum battery life |
+| `balanced` | 30 | 24 | veryfast | Good balance (default) |
+| `quality` | 30 | 20 | fast | Best visual quality |
 | `off` | — | — | — | Use source file directly (no re-encoding) |
+
+#### Video Codecs
+
+Choose the output format independently of the optimization profile:
+
+```bash
+hyprwall set file.mp4 --codec h264  # default (MP4)
+hyprwall set file.mp4 --codec av1   # modern, efficient (MKV)
+hyprwall set file.mp4 --codec vp9   # open format (WebM)
+```
+
+| Codec | Output Format | Description | Hardware Support |
+|-------|---------------|-------------|------------------|
+| `h264` | MP4 | Widely compatible (default) | CPU, NVENC |
+| `av1` | MKV | Modern, efficient | VAAPI only |
+| `vp9` | WebM | Open format | CPU only |
+
+#### Combined Example
+
+```bash
+# AV1 with ECO profile and VAAPI hardware encoding
+hyprwall set file.mp4 --profile eco --codec av1 --encoder vaapi
+
+# H.264 with QUALITY profile and CPU encoding
+hyprwall set file.mp4 --profile quality --codec h264 --encoder cpu
+```
 
 **How it works:**
 - Videos are automatically re-encoded to your monitor's native resolution
@@ -133,25 +161,33 @@ hyprwall set file.mp4 --profile off       # no optimization, use source
 HyprWall supports hardware-accelerated encoding for improved performance:
 
 ```bash
-# Automatic encoder selection (default)
+# Automatic encoder selection (default, recommended)
 hyprwall set file.mp4 --encoder auto
 
-# Force CPU encoding (libx264)
+# Force CPU encoding (libx264/libvpx-vp9)
 hyprwall set file.mp4 --encoder cpu
 
-# Force NVIDIA NVENC (if available)
-hyprwall set file.mp4 --encoder nvenc
+# Force NVIDIA NVENC (H.264 only)
+hyprwall set file.mp4 --codec h264 --encoder nvenc
 
-# Force VAAPI (AMD/Intel, AV1 only)
-hyprwall set file.mp4 --profile av1-eco --encoder vaapi
+# Force VAAPI (AV1 only, AMD/Intel)
+hyprwall set file.mp4 --codec av1 --encoder vaapi
 ```
 
-**Encoder support by codec:**
-- **H.264**: CPU (libx264) or NVENC
-- **VP9**: CPU only (libvpx-vp9)
-- **AV1**: VAAPI only (AMD Radeon 780M and similar)
+**Codec/Encoder Compatibility:**
 
-**Note:** VAAPI H.264 encoding is **not supported** on AMD Radeon 780M due to hardware limitations. Use `av1-eco` profile with VAAPI for hardware acceleration on AMD GPUs.
+| Codec | CPU | VAAPI | NVENC |
+|-------|-----|-------|-------|
+| **H.264** | libx264 | Not supported* | h264_nvenc |
+| **AV1** | Not supported | av1_vaapi | Not supported |
+| **VP9** | libvpx-vp9 | Not supported | Not supported |
+
+\* VAAPI H.264 encoding is not supported on AMD Radeon 780M due to hardware limitations.
+
+**Auto Mode Behavior:**
+- **H.264**: Tries NVENC (if NVIDIA GPU detected), falls back to CPU
+- **AV1**: Uses VAAPI (requires AMD/Intel GPU with AV1 support)
+- **VP9**: Uses CPU (only option available)
 
 ### Status & Control
 
@@ -268,7 +304,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 <div align="center">
 
-Made with ❤️ for the Hyprland community
+**Made with ❤ for the Hyprland community**
 
 [Report Bug](https://github.com/TheOnlyChou/hyprwall/issues) • [Request Feature](https://github.com/TheOnlyChou/hyprwall/issues)
 

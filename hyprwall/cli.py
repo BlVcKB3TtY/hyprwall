@@ -7,6 +7,7 @@ from pathlib import Path
 
 import hyprwall.paths as paths
 import hyprwall.detect as detect
+from hyprwall.paths import count_tree
 
 from hyprwall import runner
 from hyprwall import hypr
@@ -102,6 +103,13 @@ def parse_arguments():
 
     sub = parser.add_subparsers(dest="command", required=True)
 
+    # TLDR command parser
+    sub.add_parser(
+        "tldr",
+        help="Quick project overview (Too Long; Didn't Read)",
+        description="Display a quick overview of what HyprWall is and what it does."
+    )
+
     # Set commands parser
     set_cmd = sub.add_parser(
         "set",
@@ -133,15 +141,24 @@ When pointing to a directory, the most recent file will be used.""",
     )
     set_cmd.add_argument(
         "--profile",
-        choices=["eco", "balanced", "quality", "av1", "off"],
+        choices=["eco", "balanced", "quality", "off"],
         default="balanced",
         metavar="PROFILE",
         help="""Optimization profile for videos (default: balanced)
-  • eco      - 24fps, H.264, CRF 28, veryfast (lowest CPU/battery usage)
-  • balanced - 30fps, H.264, CRF 24, veryfast (recommended)
-  • quality  - 30fps, H.264, CRF 20, fast (best visual quality)
-  • av1      - 24fps, AV1 VAAPI, QP 28 (hardware encode, AMD/Intel only)
+  • eco      - 24fps, Quality 28, veryfast preset (lowest CPU/battery usage)
+  • balanced - 30fps, Quality 24, veryfast preset (recommended)
+  • quality  - 30fps, Quality 20, fast preset (best visual quality)
   • off      - No optimization, use source file directly""",
+    )
+    set_cmd.add_argument(
+        "--codec",
+        choices=["h264", "av1", "vp9"],
+        default="h264",
+        metavar="CODEC",
+        help="""Video codec for encoding (default: h264)
+  • h264 - H.264/AVC codec, outputs MP4 (widely compatible)
+  • av1  - AV1 codec, outputs MKV (modern, efficient, requires VAAPI)
+  • vp9  - VP9 codec, outputs WebM (open format, CPU only)""",
     )
     set_cmd.add_argument(
         "--encoder",
@@ -149,10 +166,10 @@ When pointing to a directory, the most recent file will be used.""",
         default="auto",
         metavar="ENC",
         help="""Encoding backend (default: auto)
-  • auto  - Prefer NVENC > VAAPI > CPU (may fallback on error)
-  • cpu   - libx264 CPU encoder (no hardware acceleration)
-  • vaapi - Intel/AMD hardware encode (strict, no fallback)
-  • nvenc - NVIDIA hardware encode (strict, no fallback)""",
+  • auto  - Smart selection: NVENC > CPU for H.264, VAAPI for AV1, CPU for VP9
+  • cpu   - Software encoding (libx264/libvpx-vp9, no hardware acceleration)
+  • vaapi - Intel/AMD hardware encode (strict, no fallback) - AV1 only
+  • nvenc - NVIDIA hardware encode (strict, no fallback) - H.264 only""",
     )
 
     # Status commands parser
@@ -251,7 +268,9 @@ def main():
             print_info("Source", str(valid_path))
             print_info("Mode", args.mode)
             print_info("Profile", args.profile if args.profile != "off" else "off (no optimization)")
-            print_info("Encoder", args.encoder)
+            if args.profile != "off":
+                print_info("Codec", args.codec.upper())
+                print_info("Encoder", args.encoder)
 
             if args.verbose:
                 print_info("Resolution", f"{w}×{h}")
@@ -264,15 +283,7 @@ def main():
                     "eco": optimize.ECO,
                     "balanced": optimize.BALANCED,
                     "quality": optimize.QUALITY,
-                    "av1": optimize.AV1_ECO,
                 }[args.profile]
-
-                # Force VAAPI encoder for AV1 profile
-                encoder_to_use = args.encoder
-                if args.profile == "av1" and args.encoder == "auto":
-                    encoder_to_use = "vaapi"
-                    if args.verbose:
-                        print_info("Encoder", "vaapi (forced for AV1)", indent=1)
 
                 print_header("Optimization")
                 animate_progress(f"Optimizing with '{args.profile}' profile", 0.5)
@@ -283,7 +294,8 @@ def main():
                     height=h,
                     profile=prof,
                     mode=args.mode,
-                    encoder=encoder_to_use,
+                    codec=args.codec,
+                    encoder=args.encoder,
                     verbose=args.verbose,
                 )
 
@@ -362,38 +374,150 @@ def main():
                 print_warning("No wallpaper process was running")
             print()
 
+        elif args.command == "tldr":
+            print_banner()
+            print()
+
+            print_header("What is HyprWall?")
+            print(f"{Colors.BRIGHT_WHITE}HyprWall{Colors.RESET} is a {Colors.BRIGHT_CYAN}lightweight wallpaper manager{Colors.RESET} for Hyprland.")
+            print(f"Set {Colors.BRIGHT_MAGENTA}images{Colors.RESET} or {Colors.BRIGHT_MAGENTA}animated videos{Colors.RESET} as your desktop background.")
+            print()
+
+            print_header("Why HyprWall?")
+            print(f"{Colors.CYAN}▸{Colors.RESET} {Colors.BOLD}Wayland-native{Colors.RESET} {Colors.DIM}— Built for Hyprland, no X11 legacy{Colors.RESET}")
+            print(f"{Colors.CYAN}▸{Colors.RESET} {Colors.BOLD}Smart optimization{Colors.RESET} {Colors.DIM}— Auto-encode videos for battery efficiency{Colors.RESET}")
+            print(f"{Colors.CYAN}▸{Colors.RESET} {Colors.BOLD}Intelligent caching{Colors.RESET} {Colors.DIM}— Never re-encode the same file twice{Colors.RESET}")
+            print(f"{Colors.CYAN}▸{Colors.RESET} {Colors.BOLD}Multi-monitor ready{Colors.RESET} {Colors.DIM}— Detects your displays automatically{Colors.RESET}")
+            print(f"{Colors.CYAN}▸{Colors.RESET} {Colors.BOLD}CLI-first design{Colors.RESET} {Colors.DIM}— No bloat, pure terminal efficiency{Colors.RESET}")
+            print()
+
+            print_header("Quick Start")
+            print(f"{Colors.BRIGHT_GREEN}# Set an image wallpaper{Colors.RESET}")
+            print(f"{Colors.DIM}${Colors.RESET} hyprwall set ~/Pictures/sunset.jpg")
+            print()
+            print(f"{Colors.BRIGHT_GREEN}# Set a video wallpaper (auto-optimized){Colors.RESET}")
+            print(f"{Colors.DIM}${Colors.RESET} hyprwall set ~/Videos/ocean-waves.mp4")
+            print()
+            print(f"{Colors.BRIGHT_GREEN}# Use a directory (picks most recent file){Colors.RESET}")
+            print(f"{Colors.DIM}${Colors.RESET} hyprwall set ~/Wallpapers/")
+            print()
+
+            print_header("Rendering Modes")
+            print(f"{Colors.BRIGHT_YELLOW}cover{Colors.RESET}   {Colors.DIM}→{Colors.RESET}  Fill screen, crop edges {Colors.DIM}(default for images){Colors.RESET}")
+            print(f"{Colors.BRIGHT_YELLOW}fit{Colors.RESET}     {Colors.DIM}→{Colors.RESET}  Letterbox, keep aspect ratio {Colors.DIM}(default for videos){Colors.RESET}")
+            print(f"{Colors.BRIGHT_YELLOW}stretch{Colors.RESET} {Colors.DIM}→{Colors.RESET}  Fill completely, may distort")
+            print()
+            print(f"{Colors.DIM}Example:{Colors.RESET} hyprwall set --mode fit wallpaper.jpg")
+            print()
+
+            print_header("Optimization Profiles")
+            print(f"{Colors.BRIGHT_GREEN}eco{Colors.RESET}      {Colors.DIM}→{Colors.RESET}  24fps, Quality 28 {Colors.DIM}(lowest battery usage){Colors.RESET}")
+            print(f"{Colors.BRIGHT_CYAN}balanced{Colors.RESET} {Colors.DIM}→{Colors.RESET}  30fps, Quality 24 {Colors.DIM}(recommended){Colors.RESET}")
+            print(f"{Colors.BRIGHT_MAGENTA}quality{Colors.RESET}  {Colors.DIM}→{Colors.RESET}  30fps, Quality 20 {Colors.DIM}(best visual quality){Colors.RESET}")
+            print(f"{Colors.DIM}off{Colors.RESET}      {Colors.DIM}→{Colors.RESET}  No optimization, use source directly")
+            print()
+            print(f"{Colors.DIM}Example:{Colors.RESET} hyprwall set --profile eco video.mp4")
+            print()
+
+            print_header("Video Codecs")
+            print(f"{Colors.BRIGHT_YELLOW}h264{Colors.RESET} {Colors.DIM}→{Colors.RESET}  H.264/AVC, outputs MP4 {Colors.DIM}(widely compatible, default){Colors.RESET}")
+            print(f"{Colors.BRIGHT_YELLOW}av1{Colors.RESET}  {Colors.DIM}→{Colors.RESET}  AV1, outputs MKV {Colors.DIM}(modern, efficient, VAAPI only){Colors.RESET}")
+            print(f"{Colors.BRIGHT_YELLOW}vp9{Colors.RESET}  {Colors.DIM}→{Colors.RESET}  VP9, outputs WebM {Colors.DIM}(open format, CPU only){Colors.RESET}")
+            print()
+            print(f"{Colors.DIM}Example:{Colors.RESET} hyprwall set --codec av1 video.mp4")
+            print()
+
+            print_header("Hardware Encoding")
+            print(f"{Colors.BRIGHT_YELLOW}auto{Colors.RESET}   {Colors.DIM}→{Colors.RESET}  Smart selection based on codec {Colors.DIM}(recommended){Colors.RESET}")
+            print(f"{Colors.BRIGHT_YELLOW}nvenc{Colors.RESET}  {Colors.DIM}→{Colors.RESET}  NVIDIA GPU encoding {Colors.DIM}(H.264 only, strict){Colors.RESET}")
+            print(f"{Colors.BRIGHT_YELLOW}vaapi{Colors.RESET}  {Colors.DIM}→{Colors.RESET}  Intel/AMD GPU encoding {Colors.DIM}(AV1 only, strict){Colors.RESET}")
+            print(f"{Colors.BRIGHT_YELLOW}cpu{Colors.RESET}    {Colors.DIM}→{Colors.RESET}  Software encoding {Colors.DIM}(libx264/libvpx-vp9){Colors.RESET}")
+            print()
+            print(f"{Colors.DIM}Example:{Colors.RESET} hyprwall set --codec h264 --encoder nvenc video.mp4")
+            print()
+
+            print_header("Codec/Encoder Compatibility")
+            print(f"{Colors.BRIGHT_CYAN}H.264{Colors.RESET}  {Colors.DIM}→{Colors.RESET}  CPU, NVENC {Colors.DIM}(no VAAPI on AMD Radeon 780M){Colors.RESET}")
+            print(f"{Colors.BRIGHT_CYAN}AV1{Colors.RESET}    {Colors.DIM}→{Colors.RESET}  VAAPI only {Colors.DIM}(hardware accelerated){Colors.RESET}")
+            print(f"{Colors.BRIGHT_CYAN}VP9{Colors.RESET}    {Colors.DIM}→{Colors.RESET}  CPU only")
+            print()
+
+            print_header("Other Commands")
+            print(f"{Colors.CYAN}hyprwall status{Colors.RESET}       {Colors.DIM}→{Colors.RESET}  Show current wallpaper info")
+            print(f"{Colors.CYAN}hyprwall stop{Colors.RESET}         {Colors.DIM}→{Colors.RESET}  Stop the current wallpaper")
+            print(f"{Colors.CYAN}hyprwall cache size{Colors.RESET}   {Colors.DIM}→{Colors.RESET}  Display cache statistics")
+            print(f"{Colors.CYAN}hyprwall cache clear{Colors.RESET}  {Colors.DIM}→{Colors.RESET}  Delete all cached files")
+            print()
+
+            print_header("Supported Formats")
+            print(f"{Colors.BRIGHT_MAGENTA}Images{Colors.RESET}  {Colors.DIM}→{Colors.RESET}  JPG, PNG, GIF, WebP")
+            print(f"{Colors.BRIGHT_MAGENTA}Videos{Colors.RESET}  {Colors.DIM}→{Colors.RESET}  MP4, MKV, WebM, AVI, MOV")
+            print()
+
+            print_header("Under the Hood")
+            print(f"{Colors.CYAN}▸{Colors.RESET} Built on {Colors.BRIGHT_WHITE}mpvpaper{Colors.RESET} {Colors.DIM}(the video wallpaper backend){Colors.RESET}")
+            print(f"{Colors.CYAN}▸{Colors.RESET} Uses {Colors.BRIGHT_WHITE}ffmpeg{Colors.RESET} {Colors.DIM}for smart video optimization{Colors.RESET}")
+            print(f"{Colors.CYAN}▸{Colors.RESET} Talks to {Colors.BRIGHT_WHITE}hyprctl{Colors.RESET} {Colors.DIM}for monitor detection{Colors.RESET}")
+            print(f"{Colors.CYAN}▸{Colors.RESET} XDG-compliant {Colors.DIM}(~/.cache/hyprwall, ~/.config/hyprwall){Colors.RESET}")
+            print()
+
+            print_header("Philosophy")
+            print(f"{Colors.BRIGHT_CYAN}Predictable{Colors.RESET} {Colors.DIM}— Clean process management, deterministic behavior{Colors.RESET}")
+            print(f"{Colors.BRIGHT_CYAN}Performant{Colors.RESET}  {Colors.DIM}— Minimal CPU/battery usage, laptop-friendly{Colors.RESET}")
+            print(f"{Colors.BRIGHT_CYAN}Simple{Colors.RESET}      {Colors.DIM}— No GUI bloat, just CLI efficiency{Colors.RESET}")
+            print()
+
+            print_separator("═", 60)
+            print(f"{Colors.DIM}Project:{Colors.RESET} {Colors.BRIGHT_CYAN}https://github.com/TheOnlyChou/hyprwall{Colors.RESET}")
+            print(f"{Colors.DIM}License:{Colors.RESET} {Colors.BRIGHT_WHITE}MIT{Colors.RESET}")
+            print_separator("═", 60)
+            print()
+
         elif args.command == "cache":
             if args.action == "clear":
                 print_header("Cache Management")
                 animate_progress("Clearing cache", 0.5)
 
-                count = 0
+                removed_dirs = 0
+                removed_files = 0
+
                 if paths.CACHE_DIR.exists():
                     for p in paths.CACHE_DIR.iterdir():
-                        # Skip state directory to preserve state.json
+                        # Preserve state directory (state.json + pid files)
                         if p.name == "state":
                             continue
 
+                        # Count what will be removed (recursive for directories)
                         if p.is_dir():
+                            d, f = count_tree(p)
+                            # +1 for the directory itself (so 'optimized' counts too)
+                            removed_dirs += d # Directories inside
+                            removed_files += f
                             shutil.rmtree(p, ignore_errors=True)
-                            count += 1
                         else:
                             try:
                                 p.unlink()
-                                count += 1
+                                removed_files += 1
                             except OSError:
                                 pass
 
                 paths.ensure_directories()
-                print_success(f"Cache cleared successfully ({count} items removed)")
+                print_success(
+                    f"Cache cleared successfully ({removed_dirs} dirs, {removed_files} files removed)"
+                )
                 print_info("State preserved", str(paths.STATE_DIR), indent=1)
                 print()
 
             # Always show cache info for both "size" and after "clear"
             print_header("Cache Information")
             n = cache_size_bytes(paths.CACHE_DIR)
+
+            # Show how many entries exist in optimized cache
+            opt_dirs, opt_files = count_tree(paths.OPT_DIR)
+
             print_info("Cache location", str(paths.CACHE_DIR))
             print_info("Cache size", f"{human_size(n)} ({n:,} bytes)")
+            print_info("Optimized entries", f"{opt_dirs} dirs, {opt_files} files")
             print()
 
     except KeyboardInterrupt:
