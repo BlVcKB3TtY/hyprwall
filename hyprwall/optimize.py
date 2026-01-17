@@ -31,6 +31,7 @@ class OptimizeResult:
     used: Encoder
 
 ECO = OptimizeProfile(name="eco", fps=24, quality=28, preset="veryfast")
+ECO_STRICT = OptimizeProfile(name="eco_strict", fps=18, quality=30, preset="veryfast")
 BALANCED = OptimizeProfile(name="balanced", fps=30, quality=24, preset="veryfast")
 QUALITY = OptimizeProfile(name="quality", fps=30, quality=20, preset="fast")
 

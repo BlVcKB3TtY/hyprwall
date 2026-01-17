@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.3.0 (2026-01-17)
+
+### Added
+- **Auto Power Status Command** — `hyprwall auto --status` displays current power state, profile decisions, and override status
+- **One-Shot Auto Evaluation** — `hyprwall auto --once` runs a single evaluation cycle without starting the daemon
+- **Manual Profile Override System** — New `hyprwall profile` command for manual control
+  - `hyprwall profile set <profile>` — Manually set a profile and disable auto switching
+  - `hyprwall profile auto` — Clear override and resume automatic switching
+- **Persistent Cooldown** — 60-second cooldown between profile switches (persists across daemon restarts)
+- **systemd User Service** — Production-ready systemd service file for auto daemon
+  - `hyprwall-auto.service` with automatic restart on failure
+  - Logs visible via `journalctl --user -u hyprwall-auto -f`
+
+### Changed
+- **Session State Extended** — Added three new fields to session.json:
+  - `last_switch_at` — Unix timestamp of last profile switch
+  - `cooldown_s` — Configurable cooldown period (default: 60 seconds)
+  - `override_profile` — Manual profile override (null when auto mode active)
+- **Auto Daemon Improvements** — Enhanced daemon respects override state and cooldown logic
+- **Policy Module** — New `should_switch()` helper enforces override and cooldown rules
+
+### Technical Details
+- Override state prevents auto daemon from changing profiles
+- Cooldown check uses unix timestamps for persistence across restarts
+- Session backward-compatible (new fields have sensible defaults)
+- Auto daemon exits cleanly with `--status` flag (no loop)
+
+### Migration
+No breaking changes. Existing sessions will be loaded with default values:
+- `last_switch_at` = 0.0 (no previous switch)
+- `cooldown_s` = 60 (60-second default)
+- `override_profile` = None (auto mode)
+
 ## v0.2.1 (2026-01-17)
 
 ### Changed

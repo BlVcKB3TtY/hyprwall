@@ -6,4 +6,7 @@ __all__ = [
     "detect",
     "paths",
     "optimize",
+    "policy",
+    "power",
+    "session",
 ]

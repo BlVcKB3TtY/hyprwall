@@ -8,6 +8,9 @@ from pathlib import Path
 import hyprwall.paths as paths
 import hyprwall.detect as detect
 from hyprwall.paths import count_tree
+from hyprwall.session import save_session, load_session, Session
+from hyprwall.power import get_power_status
+from hyprwall.policy import choose_profile, Hysteresis, should_switch
 
 from hyprwall import runner
 from hyprwall import hypr
@@ -172,6 +175,12 @@ When pointing to a directory, the most recent file will be used.""",
   • nvenc - NVIDIA hardware encode (strict, no fallback) - H.264 only""",
     )
 
+    set_cmd.add_argument(
+        "--auto-power",
+        action="store_true",
+        help="Enable dynamic profile switching based on battery/AC state"
+    )
+
     # Status commands parser
     sub.add_parser(
         "status",
@@ -184,6 +193,50 @@ When pointing to a directory, the most recent file will be used.""",
         "stop",
         help="Stop current wallpaper",
         description="Stop the currently running wallpaper (mpvpaper process)."
+    )
+
+    # Auto commands parser
+    auto_cmd = sub.add_parser(
+        "auto",
+        help="Run auto power-aware profile switching daemon",
+        description="""Run the automatic power-aware profile switching daemon.
+
+This daemon monitors your power status (AC/battery) and battery level to automatically
+switch between optimization profiles. Requires a session created with --auto-power.""",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    auto_cmd.add_argument(
+        "--once",
+        action="store_true",
+        help="Run one evaluation cycle and exit (no daemon loop)"
+    )
+    auto_cmd.add_argument(
+        "--status",
+        action="store_true",
+        help="Show current auto power status and exit"
+    )
+
+    # Profile commands parser
+    profile_cmd = sub.add_parser(
+        "profile",
+        help="Manage profile overrides",
+        description="""Manually override automatic profile switching.
+        
+When an override is set, the auto daemon will not change profiles automatically.""",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    profile_cmd.add_argument(
+        "action",
+        choices=["set", "auto"],
+        help="""Profile action
+  • set  - Manually set a specific profile (disables auto switching)
+  • auto - Clear override and resume automatic switching"""
+    )
+    profile_cmd.add_argument(
+        "profile_name",
+        nargs="?",
+        choices=["eco", "balanced", "quality", "eco_strict"],
+        help="Profile to set (required for 'set' action)"
     )
 
     # Cache commands parser
@@ -263,6 +316,11 @@ def main():
             w, h = hypr.monitor_resolution(monitor)
             print_success(f"Target monitor: {Colors.BRIGHT_WHITE}{monitor}{Colors.RESET} ({w}×{h})")
 
+            # Validate auto-power settings
+            if args.auto_power and args.profile == "off":
+                print_error("Cannot use --auto-power with --profile off")
+                raise SystemExit(1)
+
             # Display configuration
             print_header("Configuration")
             print_info("Source", str(valid_path))
@@ -332,6 +390,21 @@ def main():
                 mode=args.mode,
             )
 
+            # Save session for auto-power switching
+            applied_profile = args.profile if args.profile != "off" else "off"
+            save_session(Session(
+                source=str(valid_path),
+                monitor=str(monitor),
+                mode=str(args.mode),
+                codec=str(args.codec),
+                encoder=str(args.encoder),
+                auto_power=bool(args.auto_power),
+                last_profile=str(applied_profile),
+                last_switch_at=0.0,  # No switch yet
+                cooldown_s=60,  # Default cooldown
+                override_profile=None,  # No override on initial set
+            ))
+
             print_header("Success!")
             print_success(f"Wallpaper set on monitor {Colors.BRIGHT_WHITE}{state.monitor}{Colors.RESET}")
             print_info("Rendering mode", state.mode, indent=1)
@@ -374,6 +447,253 @@ def main():
                 print_warning("No wallpaper process was running")
             print()
 
+        elif args.command == "auto":
+            sess = load_session()
+            if not sess:
+                print_error("No session found. Run 'hyprwall set ... --auto-power' first.")
+                raise SystemExit(1)
+
+            if not sess.auto_power:
+                print_warning("auto_power is disabled in session. Re-run set with --auto-power.")
+                raise SystemExit(1)
+
+            # Handle --status flag
+            if args.status:
+                print_header("Auto Power Status")
+                st = get_power_status()
+                h = Hysteresis()
+                target = choose_profile(st, sess.last_profile, h)
+
+                print_info("Power State", f"AC={st.on_ac}, Battery={st.percent}%")
+                print_info("Last Profile", sess.last_profile)
+                print_info("Target Profile", target)
+                print_info("Auto Power", "enabled" if sess.auto_power else "disabled")
+                print_info("Override", sess.override_profile or "none")
+                print_info("Cooldown", f"{sess.cooldown_s}s")
+
+                elapsed = int(time.time() - sess.last_switch_at) if sess.last_switch_at > 0 else 0
+                if sess.last_switch_at > 0:
+                    print_info("Last Switch", f"{elapsed}s ago")
+                else:
+                    print_info("Last Switch", "never")
+
+                print()
+
+                if sess.override_profile:
+                    print_warning(f"Manual override active: {sess.override_profile}")
+                    print_info("Tip", "Run 'hyprwall profile auto' to resume automatic switching", indent=1)
+                elif target != sess.last_profile:
+                    can_switch = should_switch(
+                        target,
+                        sess.last_profile,
+                        sess.last_switch_at,
+                        sess.cooldown_s,
+                        sess.override_profile
+                    )
+                    if can_switch:
+                        print_success(f"Ready to switch to: {target}")
+                    else:
+                        remaining = sess.cooldown_s - elapsed
+                        if remaining < 0:
+                            remaining = 0
+                        print_warning(f"Cooldown active: {remaining}s remaining")
+                else:
+                    print_success("Profile is optimal")
+
+                print()
+                raise SystemExit(0)
+
+            # Normal daemon mode
+            print_header("Auto Power Profiles")
+            h = Hysteresis()
+            last = sess.last_profile
+
+            print_info("Source", sess.source)
+            print_info("Monitor", sess.monitor)
+            print_info("Mode", sess.mode)
+            print_info("Codec", sess.codec)
+            print_info("Encoder", sess.encoder)
+            print_info("Last profile", last)
+            if sess.override_profile:
+                print_info("Override", sess.override_profile)
+            print()
+
+            if not args.once:
+                print_success("Auto power daemon started. Press Ctrl+C to stop.")
+                print()
+
+            while True:
+                st = get_power_status()
+                target = choose_profile(st, last, h)
+
+                # Check if switch is allowed (respects override and cooldown)
+                if should_switch(target, last, sess.last_switch_at, sess.cooldown_s, sess.override_profile):
+                    print_info("Power", f"on_ac={st.on_ac} percent={st.percent}")
+                    print_warning(f"Switch profile: {last} -> {target}")
+
+                    # Resolve OptimizeProfile object
+                    prof = {
+                        "eco": optimize.ECO,
+                        "balanced": optimize.BALANCED,
+                        "quality": optimize.QUALITY,
+                        "eco_strict": optimize.ECO_STRICT,
+                    }[target]
+
+                    # Re-optimize from SOURCE (not cached optimized file)
+                    src = Path(sess.source)
+                    w, hres = hypr.monitor_resolution(sess.monitor)
+
+                    res = optimize.ensure_optimized(
+                        src,
+                        width=w,
+                        height=hres,
+                        profile=prof,
+                        mode=sess.mode,
+                        codec=sess.codec,
+                        encoder=sess.encoder,
+                        verbose=False,
+                    )
+
+                    runner.stop()
+                    runner.start(
+                        monitor=sess.monitor,
+                        file=res.path,
+                        extra_args=[],
+                        mode=sess.mode,
+                    )
+
+                    last = target
+                    save_session(Session(
+                        source=sess.source,
+                        monitor=sess.monitor,
+                        mode=sess.mode,
+                        codec=sess.codec,
+                        encoder=sess.encoder,
+                        auto_power=True,
+                        last_profile=last,
+                        last_switch_at=time.time(),
+                        cooldown_s=sess.cooldown_s,
+                        override_profile=sess.override_profile,
+                    ))
+
+                    # debounce
+                    time.sleep(10)
+
+                # Exit if --once flag
+                if args.once:
+                    if target == last:
+                        print_success(f"Profile is optimal: {last}")
+                    print()
+                    break
+
+                # polling interval
+                if st.on_ac is True:
+                    time.sleep(90)
+                else:
+                    time.sleep(25)
+
+        elif args.command == "profile":
+            print_header("Profile Management")
+            sess = load_session()
+            if not sess:
+                print_error("No session found. Run 'hyprwall set' first.")
+                raise SystemExit(1)
+
+            if args.action == "set":
+                if not args.profile_name:
+                    print_error("Profile name required for 'set' action")
+                    print_info("Usage", "hyprwall profile set <eco|balanced|quality|eco_strict>", indent=1)
+                    raise SystemExit(1)
+
+                target_profile = args.profile_name
+
+                print_info("Current profile", sess.last_profile)
+                print_info("Override to", target_profile)
+                print()
+
+                # Resolve OptimizeProfile object
+                prof = {
+                    "eco": optimize.ECO,
+                    "balanced": optimize.BALANCED,
+                    "quality": optimize.QUALITY,
+                    "eco_strict": optimize.ECO_STRICT,
+                }[target_profile]
+
+                # Re-optimize and apply
+                src = Path(sess.source)
+                w, hres = hypr.monitor_resolution(sess.monitor)
+
+                animate_progress("Optimizing video", 1.0)
+                res = optimize.ensure_optimized(
+                    src,
+                    width=w,
+                    height=hres,
+                    profile=prof,
+                    mode=sess.mode,
+                    codec=sess.codec,
+                    encoder=sess.encoder,
+                    verbose=args.verbose,
+                )
+
+                runner.stop()
+                runner.start(
+                    monitor=sess.monitor,
+                    file=res.path,
+                    extra_args=[],
+                    mode=sess.mode,
+                )
+
+                # Save with override set
+                save_session(Session(
+                    source=sess.source,
+                    monitor=sess.monitor,
+                    mode=sess.mode,
+                    codec=sess.codec,
+                    encoder=sess.encoder,
+                    auto_power=sess.auto_power,
+                    last_profile=target_profile,
+                    last_switch_at=time.time(),
+                    cooldown_s=sess.cooldown_s,
+                    override_profile=target_profile,  # Set override
+                ))
+
+                print_success(f"Profile set to: {target_profile}")
+                print_warning("Auto power switching is now DISABLED")
+                print_info("Tip", "Run 'hyprwall profile auto' to re-enable automatic switching", indent=1)
+                print()
+
+            elif args.action == "auto":
+                if sess.override_profile is None:
+                    print_success("Auto mode already active")
+                    print()
+                    raise SystemExit(0)
+
+                print_info("Previous override", sess.override_profile)
+                print_info("Resuming", "automatic profile switching")
+                print()
+
+                # Clear override
+                save_session(Session(
+                    source=sess.source,
+                    monitor=sess.monitor,
+                    mode=sess.mode,
+                    codec=sess.codec,
+                    encoder=sess.encoder,
+                    auto_power=sess.auto_power,
+                    last_profile=sess.last_profile,
+                    last_switch_at=sess.last_switch_at,
+                    cooldown_s=sess.cooldown_s,
+                    override_profile=None,  # Clear override
+                ))
+
+                print_success("Automatic profile switching re-enabled")
+                if sess.auto_power:
+                    print_info("Tip", "Run 'hyprwall auto' daemon to apply automatic switching", indent=1)
+                else:
+                    print_warning("Note: auto_power is disabled in session")
+                    print_info("Tip", "Run 'hyprwall set --auto-power' to enable it", indent=1)
+                print()
+
         elif args.command == "tldr":
             print_banner()
             print()
@@ -386,6 +706,7 @@ def main():
             print_header("Why HyprWall?")
             print(f"{Colors.CYAN}▸{Colors.RESET} {Colors.BOLD}Wayland-native{Colors.RESET} {Colors.DIM}— Built for Hyprland, no X11 legacy{Colors.RESET}")
             print(f"{Colors.CYAN}▸{Colors.RESET} {Colors.BOLD}Smart optimization{Colors.RESET} {Colors.DIM}— Auto-encode videos for battery efficiency{Colors.RESET}")
+            print(f"{Colors.CYAN}▸{Colors.RESET} {Colors.BOLD}Power-aware{Colors.RESET} {Colors.DIM}— Automatically adjust quality based on AC/battery state{Colors.RESET}")
             print(f"{Colors.CYAN}▸{Colors.RESET} {Colors.BOLD}Intelligent caching{Colors.RESET} {Colors.DIM}— Never re-encode the same file twice{Colors.RESET}")
             print(f"{Colors.CYAN}▸{Colors.RESET} {Colors.BOLD}Multi-monitor ready{Colors.RESET} {Colors.DIM}— Detects your displays automatically{Colors.RESET}")
             print(f"{Colors.CYAN}▸{Colors.RESET} {Colors.BOLD}CLI-first design{Colors.RESET} {Colors.DIM}— No bloat, pure terminal efficiency{Colors.RESET}")
@@ -442,6 +763,28 @@ def main():
             print(f"{Colors.BRIGHT_CYAN}VP9{Colors.RESET}    {Colors.DIM}→{Colors.RESET}  CPU only")
             print()
 
+            print_header("Auto Power Management")
+            print(f"{Colors.BRIGHT_GREEN}# Enable auto power switching{Colors.RESET}")
+            print(f"{Colors.DIM}${Colors.RESET} hyprwall set video.mp4 --auto-power")
+            print()
+            print(f"{Colors.BRIGHT_GREEN}# Run the auto daemon (monitors battery/AC state){Colors.RESET}")
+            print(f"{Colors.DIM}${Colors.RESET} hyprwall auto")
+            print()
+            print(f"{Colors.BRIGHT_GREEN}# Check auto power status{Colors.RESET}")
+            print(f"{Colors.DIM}${Colors.RESET} hyprwall auto --status")
+            print()
+            print(f"{Colors.BRIGHT_GREEN}# Run one evaluation cycle (no daemon loop){Colors.RESET}")
+            print(f"{Colors.DIM}${Colors.RESET} hyprwall auto --once")
+            print()
+
+            print_header("Manual Profile Override")
+            print(f"{Colors.BRIGHT_GREEN}# Manually set a specific profile (disables auto){Colors.RESET}")
+            print(f"{Colors.DIM}${Colors.RESET} hyprwall profile set eco")
+            print()
+            print(f"{Colors.BRIGHT_GREEN}# Clear override and resume automatic switching{Colors.RESET}")
+            print(f"{Colors.DIM}${Colors.RESET} hyprwall profile auto")
+            print()
+
             print_header("Other Commands")
             print(f"{Colors.CYAN}hyprwall status{Colors.RESET}       {Colors.DIM}→{Colors.RESET}  Show current wallpaper info")
             print(f"{Colors.CYAN}hyprwall stop{Colors.RESET}         {Colors.DIM}→{Colors.RESET}  Stop the current wallpaper")
@@ -452,6 +795,17 @@ def main():
             print_header("Supported Formats")
             print(f"{Colors.BRIGHT_MAGENTA}Images{Colors.RESET}  {Colors.DIM}→{Colors.RESET}  JPG, PNG, GIF, WebP")
             print(f"{Colors.BRIGHT_MAGENTA}Videos{Colors.RESET}  {Colors.DIM}→{Colors.RESET}  MP4, MKV, WebM, AVI, MOV")
+            print()
+
+            print_header("Systemd Integration")
+            print(f"{Colors.BRIGHT_GREEN}# Run auto daemon as a systemd user service{Colors.RESET}")
+            print(f"{Colors.DIM}${Colors.RESET} systemctl --user enable --now hyprwall-auto.service")
+            print()
+            print(f"{Colors.BRIGHT_GREEN}# View daemon logs{Colors.RESET}")
+            print(f"{Colors.DIM}${Colors.RESET} journalctl --user -u hyprwall-auto -f")
+            print()
+            print(f"{Colors.BRIGHT_GREEN}# Stop the daemon{Colors.RESET}")
+            print(f"{Colors.DIM}${Colors.RESET} systemctl --user stop hyprwall-auto.service")
             print()
 
             print_header("Under the Hood")

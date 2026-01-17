@@ -231,6 +231,132 @@ hyprwall cache clear
 - Optimized files are stored in `~/.cache/hyprwall/optimized/`
 - Changing source files or encoding settings automatically triggers re-encoding
 
+### Auto Power Management
+
+HyprWall can automatically adjust optimization profiles based on your power state (AC/battery) and battery level, extending battery life without manual intervention.
+
+#### Quick Start
+
+```bash
+# 1. Set wallpaper with auto-power enabled
+hyprwall set video.mp4 --auto-power
+
+# 2. Check what the daemon would do
+hyprwall auto --status
+
+# 3. Start the daemon
+hyprwall auto
+```
+
+#### Commands
+
+| Command | Description |
+|---------|-------------|
+| `hyprwall auto` | Start daemon (runs until Ctrl+C) |
+| `hyprwall auto --status` | Show power state, profiles, and decisions |
+| `hyprwall auto --once` | Run one evaluation cycle and exit |
+
+#### Auto Profile Logic
+
+The daemon automatically selects profiles based on your battery level:
+
+| Power State | Battery Level | Profile Used | FPS | Quality |
+|-------------|---------------|--------------|-----|---------|
+| AC connected | Any | `balanced` | 30 | 24 |
+| Battery | > 40% | `balanced` | 30 | 24 |
+| Battery | ≤ 40% | `eco` | 24 | 28 |
+| Battery | ≤ 20% | `eco_strict` | 18 | 30 |
+
+**Smart Features:**
+- **60-second cooldown** prevents rapid switching
+- **Hysteresis** avoids oscillation at thresholds (e.g., eco activates at 40%, but exits at 45%)
+- **Persistent state** survives daemon restarts
+
+#### systemd Service (Recommended)
+
+Run the daemon automatically on login:
+
+```bash
+# Install service
+mkdir -p ~/.config/systemd/user
+cp hyprwall-auto.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+
+# Enable and start
+systemctl --user enable --now hyprwall-auto
+
+# Check status
+systemctl --user status hyprwall-auto
+
+# View live logs
+journalctl --user -u hyprwall-auto -f
+```
+
+**Service features:**
+- Auto-start on login
+- Automatic restart on failure
+- Logs visible via `journalctl`
+
+### Manual Profile Control
+
+Override automatic switching when you need consistent performance or quality.
+
+#### Commands
+
+```bash
+# Force a specific profile (disables auto switching)
+hyprwall profile set eco
+hyprwall profile set balanced
+hyprwall profile set quality
+hyprwall profile set eco_strict
+
+# Resume automatic switching
+hyprwall profile auto
+```
+
+#### Behavior
+
+When you set a manual override:
+- The auto daemon **stops making automatic switches**
+- Your chosen profile persists across reboots
+- Use `hyprwall auto --status` to see current override state
+- Clear with `hyprwall profile auto` to resume automatic behavior
+
+#### Example Workflows
+
+**Gaming session:**
+```bash
+# Force quality mode for smooth gameplay
+hyprwall profile set quality
+
+# Game, enjoy smooth wallpaper
+
+# When done: resume battery-aware switching
+hyprwall profile auto
+```
+
+**Battery emergency:**
+```bash
+# Force eco_strict to maximize battery life
+hyprwall profile set eco_strict
+
+# Auto daemon won't interfere, stays in eco mode
+
+# When plugged in: resume auto
+hyprwall profile auto
+```
+
+**Testing a profile:**
+```bash
+# Set eco to test battery impact
+hyprwall profile set eco
+
+# Monitor battery consumption
+
+# Resume auto when satisfied
+hyprwall profile auto
+```
+
 ## Documentation
 
 ### XDG Base Directory Compliance
@@ -242,6 +368,92 @@ HyprWall follows the [XDG Base Directory Specification](https://specifications.f
 | Config | `~/.config/hyprwall/` |
 | Cache | `~/.cache/hyprwall/` |
 | State | `~/.cache/hyprwall/state/` |
+
+### Troubleshooting
+
+#### Auto daemon won't start
+
+```bash
+# Check session exists
+cat ~/.cache/hyprwall/state/session.json
+
+# If missing, create one
+hyprwall set video.mp4 --auto-power
+
+# Check daemon status
+hyprwall auto --status
+```
+
+**Common issues:**
+- `No session found` → Run `hyprwall set --auto-power` first
+- `auto_power disabled` → Re-run set with `--auto-power` flag
+- Permission errors → Ensure `hyprwall` is in PATH (`~/.local/bin`)
+
+#### Profile won't switch
+
+```bash
+# Check if override is active
+hyprwall auto --status
+
+# If override is set, clear it
+hyprwall profile auto
+
+# Check cooldown remaining
+hyprwall auto --status  # Shows time since last switch
+```
+
+**Reasons for no switch:**
+- Manual override active (clear with `hyprwall profile auto`)
+- Cooldown period active (wait 60s after last switch)
+- Target profile same as current (no change needed)
+- Power state unchanged (AC still connected, battery % stable)
+
+#### Encoder errors
+
+```bash
+# Check available encoders
+ffmpeg -hide_banner -encoders | grep -E "(h264|av1|vp9)"
+
+# Test specific encoder
+hyprwall set video.mp4 --codec h264 --encoder cpu --verbose
+```
+
+**Common encoder issues:**
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `nvenc not supported` | H.264 with NVENC on non-NVIDIA GPU | Use `--encoder cpu` or `--encoder auto` |
+| `vaapi not supported` | AV1 without AMD/Intel GPU | Use `--codec h264` instead |
+| `CUDA library not found` | NVENC without CUDA runtime | Install CUDA or use `--encoder cpu` |
+
+#### Check session state
+
+```bash
+# View current session
+cat ~/.cache/hyprwall/state/session.json
+
+# Key fields:
+# - override_profile: null (auto) or profile name (manual)
+# - last_switch_at: unix timestamp of last switch
+# - cooldown_s: cooldown period (default: 60)
+# - auto_power: true/false
+```
+
+#### systemd service issues
+
+```bash
+# Check service status
+systemctl --user status hyprwall-auto
+
+# View recent logs
+journalctl --user -u hyprwall-auto -n 50
+
+# Restart service
+systemctl --user restart hyprwall-auto
+
+# Check if session exists
+ls -lh ~/.cache/hyprwall/state/session.json
+```
 
 ### Why not swww?
 
