@@ -34,7 +34,7 @@ Unlike heavier "wallpaper engines", HyprWall is designed with a focus on:
 - **Smart optimization** — Automatic video encoding with three performance profiles
 - **Intelligent caching** — Content-based fingerprinting avoids redundant re-encoding
 - **Resolution-aware** — Automatically scales to your monitor's native resolution
-- **Multi-monitor aware** — Automatic detection via `hyprctl`
+- **Multi-monitor support** — Set wallpaper on all monitors with `--all` flag
 - **Directory support** — Automatically uses the most recent file from a directory
 - **Safe process handling** — Kills stale mpvpaper instances, avoids PID reuse bugs
 - **Persistent state** — Status inspection and XDG-compliant paths
@@ -84,6 +84,9 @@ hyprwall set ~/Videos/wallpaper.mp4
 
 # Use a directory (selects most recent file)
 hyprwall set ~/Pictures/wallpapers
+
+# Set wallpaper on all monitors (multi-monitor mode)
+hyprwall set ~/Videos/wallpaper.mp4 --all
 ```
 
 ### Rendering Modes
@@ -101,6 +104,54 @@ hyprwall set file.jpg --mode stretch  # fill screen, distort
 | `fit` | Keep aspect ratio (letterbox) |
 | `cover` | Fill screen, crop if needed |
 | `stretch` | Fill screen, distort |
+
+### Multi-Monitor Setup
+
+HyprWall supports setting the same wallpaper across all active monitors simultaneously:
+
+```bash
+# Apply wallpaper to all monitors
+hyprwall set wallpaper.mp4 --all
+
+# Combine with profiles and modes
+hyprwall set wallpaper.mp4 --all --profile eco --mode cover
+```
+
+**How it works:**
+- Same source file is used for all monitors
+- Automatically optimizes for each monitor's resolution
+- Intelligent caching: one optimization per unique resolution
+- Monitors with same resolution share the optimized file
+- Each monitor runs its own mpvpaper instance
+
+**Multi-monitor status:**
+```bash
+hyprwall status
+```
+
+Shows per-monitor information:
+```
+Status: running (multi-monitor)
+
+Monitor: eDP-1
+  File: /home/user/Videos/wallpaper.mp4
+  Mode: cover
+  PID: 12345
+
+Monitor: HDMI-A-1
+  File: /home/user/Videos/wallpaper.mp4
+  Mode: cover
+  PID: 12346
+```
+
+**Single monitor mode (default):**
+```bash
+# Set wallpaper on primary monitor only
+hyprwall set wallpaper.jpg
+
+# Set wallpaper on specific monitor
+hyprwall set wallpaper.jpg --monitor HDMI-A-1
+```
 
 ### Optimization Profiles
 
@@ -197,17 +248,34 @@ hyprwall set file.mp4 --codec av1 --encoder vaapi
 hyprwall status
 ```
 
-**Output example:**
+**Single monitor output:**
 ```
 Status: running
 Monitor: eDP-1
 File: /home/user/Pictures/wallpaper.jpg
 Mode: cover
+PID: 12345
+```
+
+**Multi-monitor output:**
+```
+Status: running (multi-monitor)
+
+Monitor: eDP-1
+  File: /home/user/Videos/wallpaper.mp4
+  Mode: cover
+  PID: 12345
+
+Monitor: HDMI-A-1
+  File: /home/user/Videos/wallpaper.mp4
+  Mode: cover
+  PID: 12346
 ```
 
 #### Stop Wallpaper
 
 ```bash
+# Stop all running wallpapers (single or multi-monitor)
 hyprwall stop
 ```
 

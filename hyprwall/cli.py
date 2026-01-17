@@ -132,6 +132,11 @@ When pointing to a directory, the most recent file will be used.""",
         help="Monitor name (e.g., eDP-1, HDMI-A-1). Default: focused monitor"
     )
     set_cmd.add_argument(
+        "--all",
+        action="store_true",
+        help="Set wallpaper on all active monitors (multi-monitor mode)"
+    )
+    set_cmd.add_argument(
         "--mode",
         choices=["auto", "fit", "cover", "stretch"],
         default="auto",
@@ -191,8 +196,8 @@ When pointing to a directory, the most recent file will be used.""",
     # Stop commands parser
     sub.add_parser(
         "stop",
-        help="Stop current wallpaper",
-        description="Stop the currently running wallpaper (mpvpaper process)."
+        help="Stop all wallpapers",
+        description="Stop all currently running wallpapers (mpvpaper processes)."
     )
 
     # Auto commands parser
@@ -305,16 +310,37 @@ def main():
 
     try:
         if args.command == "set":
+            # Validate --all and --monitor conflict
+            if args.all and args.monitor:
+                print_error("Cannot use --all and --monitor together")
+                raise SystemExit(1)
+
             # Validate wallpaper path
             animate_progress("Validating wallpaper path", 0.3)
             valid_path = detect.validate_wallpaper(args.path)
             print_success(f"Wallpaper found: {Colors.DIM}{valid_path.name}{Colors.RESET}")
 
-            # Detect monitor
+            # Detect monitor(s)
             animate_progress("Detecting monitor configuration", 0.3)
-            monitor = args.monitor or hypr.default_monitor_name()
-            w, h = hypr.monitor_resolution(monitor)
-            print_success(f"Target monitor: {Colors.BRIGHT_WHITE}{monitor}{Colors.RESET} ({w}×{h})")
+
+            if args.all:
+                # Multi-monitor mode
+                monitors = hypr.list_monitors()
+                if not monitors:
+                    print_error("No monitors detected")
+                    raise SystemExit(1)
+
+                print_success(f"Detected {len(monitors)} monitor(s):")
+                for m in monitors:
+                    print_info(f"  • {m.name}", f"{m.width}×{m.height}", indent=1)
+
+                target_monitors = [(m.name, m.width, m.height) for m in monitors]
+            else:
+                # Single-monitor mode (legacy)
+                monitor = args.monitor or hypr.default_monitor_name()
+                w, h = hypr.monitor_resolution(monitor)
+                print_success(f"Target monitor: {Colors.BRIGHT_WHITE}{monitor}{Colors.RESET} ({w}×{h})")
+                target_monitors = [(monitor, w, h)]
 
             # Validate auto-power settings
             if args.auto_power and args.profile == "off":
@@ -325,17 +351,17 @@ def main():
             print_header("Configuration")
             print_info("Source", str(valid_path))
             print_info("Mode", args.mode)
+            if args.all:
+                print_info("Target", f"All monitors ({len(target_monitors)})")
             print_info("Profile", args.profile if args.profile != "off" else "off (no optimization)")
             if args.profile != "off":
                 print_info("Codec", args.codec.upper())
                 print_info("Encoder", args.encoder)
-
-            if args.verbose:
-                print_info("Resolution", f"{w}×{h}")
             print()
 
-            # Optimization phase
-            file_to_play = valid_path
+            # Optimization phase - optimize per resolution
+            monitor_files = {}  # {monitor_name: file_to_play}
+
             if args.profile != "off":
                 prof = {
                     "eco": optimize.ECO,
@@ -344,71 +370,130 @@ def main():
                 }[args.profile]
 
                 print_header("Optimization")
-                animate_progress(f"Optimizing with '{args.profile}' profile", 0.5)
 
-                res = optimize.ensure_optimized(
-                    valid_path,
-                    width=w,
-                    height=h,
-                    profile=prof,
-                    mode=args.mode,
-                    codec=args.codec,
-                    encoder=args.encoder,
-                    verbose=args.verbose,
-                )
+                # Group monitors by resolution to avoid duplicate optimizations
+                res_to_monitors = {}
+                for mon_name, w, h in target_monitors:
+                    key = (w, h)
+                    if key not in res_to_monitors:
+                        res_to_monitors[key] = []
+                    res_to_monitors[key].append(mon_name)
 
-                file_to_play = res.path
+                # Optimize once per unique resolution
+                res_to_file = {}
+                for (w, h), mon_names in res_to_monitors.items():
+                    animate_progress(f"Optimizing for {w}×{h} ({len(mon_names)} monitor(s))", 0.5)
 
-                # Display truthful information about what happened
-                if res.cache_hit:
-                    print_success(f"Cache hit: reusing optimized file")
-                    if args.verbose:
-                        print_info("Encoder used", res.used, indent=1)
-                else:
-                    if res.used == res.chosen:
-                        print_success(f"Encoded with {res.used.upper()}")
+                    res = optimize.ensure_optimized(
+                        valid_path,
+                        width=w,
+                        height=h,
+                        profile=prof,
+                        mode=args.mode,
+                        codec=args.codec,
+                        encoder=args.encoder,
+                        verbose=args.verbose,
+                    )
+
+                    res_to_file[(w, h)] = res.path
+
+                    # Display truthful information about what happened
+                    if res.cache_hit:
+                        print_success(f"Cache hit for {w}×{h}")
+                        if args.verbose:
+                            print_info("Encoder used", res.used, indent=1)
                     else:
-                        print_warning(f"{res.chosen.upper()} failed, fallback to {res.used.upper()} (auto mode)")
+                        if res.used == res.chosen:
+                            print_success(f"Encoded {w}×{h} with {res.used.upper()}")
+                        else:
+                            print_warning(f"{res.chosen.upper()} failed, fallback to {res.used.upper()} (auto mode)")
 
-                if args.verbose:
-                    print_info("Optimized file", str(file_to_play), indent=1)
-                    if res.requested != res.chosen:
-                        print_info("Encoder selection", f"requested={res.requested}, chosen={res.chosen}, used={res.used}", indent=1)
+                    if args.verbose:
+                        print_info("Optimized file", str(res.path), indent=1)
+                        if res.requested != res.chosen:
+                            print_info("Encoder selection", f"requested={res.requested}, chosen={res.chosen}, used={res.used}", indent=1)
+
+                # Map monitors to their optimized files
+                for mon_name, w, h in target_monitors:
+                    monitor_files[mon_name] = res_to_file[(w, h)]
+
                 print()
+            else:
+                # No optimization - use source file for all
+                for mon_name, w, h in target_monitors:
+                    monitor_files[mon_name] = valid_path
 
             # Stop existing wallpaper
             animate_progress("Stopping existing wallpaper", 0.3)
             runner.stop()
 
-            # Start new wallpaper
-            print_info("Playing", str(file_to_play))
-            animate_progress("Starting wallpaper", 0.5)
-            state = runner.start(
-                monitor=monitor,
-                file=file_to_play,
-                extra_args=[],
-                mode=args.mode,
-            )
+            # Start wallpaper(s)
+            if args.all:
+                # Multi-monitor start
+                print_header("Starting Wallpapers")
+                entries = [
+                    runner.StartManyEntry(
+                        monitor=mon_name,
+                        file=monitor_files[mon_name],
+                        mode=args.mode,
+                    )
+                    for mon_name, w, h in target_monitors
+                ]
 
-            # Save session for auto-power switching
-            applied_profile = args.profile if args.profile != "off" else "off"
-            save_session(Session(
-                source=str(valid_path),
-                monitor=str(monitor),
-                mode=str(args.mode),
-                codec=str(args.codec),
-                encoder=str(args.encoder),
-                auto_power=bool(args.auto_power),
-                last_profile=str(applied_profile),
-                last_switch_at=0.0,  # No switch yet
-                cooldown_s=60,  # Default cooldown
-                override_profile=None,  # No override on initial set
-            ))
+                animate_progress("Starting wallpapers on all monitors", 0.5)
+                multi_state = runner.start_many(entries, extra_args=[])
 
-            print_header("Success!")
-            print_success(f"Wallpaper set on monitor {Colors.BRIGHT_WHITE}{state.monitor}{Colors.RESET}")
-            print_info("Rendering mode", state.mode, indent=1)
-            print_info("Process ID", f"PID={state.pid}, PGID={state.pgid}", indent=1)
+                print_success(f"Started on {len(multi_state.monitors)} monitor(s)")
+                for mon_name in multi_state.monitors:
+                    print_info(f"  • {mon_name}", f"PID={multi_state.monitors[mon_name].pid}", indent=1)
+
+                # Save session with __all__ convention
+                save_session(Session(
+                    source=str(valid_path),
+                    monitor="__all__",
+                    mode=str(args.mode),
+                    codec=str(args.codec),
+                    encoder=str(args.encoder),
+                    auto_power=bool(args.auto_power),
+                    last_profile=args.profile if args.profile != "off" else "off",
+                    last_switch_at=0.0,
+                    cooldown_s=60,
+                    override_profile=None,
+                ))
+            else:
+                # Single-monitor start (legacy)
+                monitor = target_monitors[0][0]
+                file_to_play = monitor_files[monitor]
+
+                print_info("Playing", str(file_to_play))
+                animate_progress("Starting wallpaper", 0.5)
+                state = runner.start(
+                    monitor=monitor,
+                    file=file_to_play,
+                    extra_args=[],
+                    mode=args.mode,
+                )
+
+                # Save session for auto-power switching
+                applied_profile = args.profile if args.profile != "off" else "off"
+                save_session(Session(
+                    source=str(valid_path),
+                    monitor=str(monitor),
+                    mode=str(args.mode),
+                    codec=str(args.codec),
+                    encoder=str(args.encoder),
+                    auto_power=bool(args.auto_power),
+                    last_profile=str(applied_profile),
+                    last_switch_at=0.0,  # No switch yet
+                    cooldown_s=60,  # Default cooldown
+                    override_profile=None,  # No override on initial set
+                ))
+
+                print_header("Success!")
+                print_success(f"Wallpaper set on monitor {Colors.BRIGHT_WHITE}{state.monitor}{Colors.RESET}")
+                print_info("Rendering mode", state.mode, indent=1)
+                print_info("Process ID", f"PID={state.pid}, PGID={state.pgid}", indent=1)
+
             print()
 
         elif args.command == "status":
@@ -422,27 +507,53 @@ def main():
                     print(f"{Colors.DIM}Raw state: {st}{Colors.RESET}")
                 return
 
-            print_info("Status", f"{Colors.BRIGHT_GREEN}Running{Colors.RESET}")
-            print_info("Monitor", st.get('monitor', 'unknown'))
-            print_info("File", st.get('file', 'unknown'))
-            print_info("Mode", st.get('mode', 'auto'))
-            print_info("Process", f"PID={st['pid']}, PGID={st['pgid']}")
-
-            if args.verbose:
+            # Check if multi-monitor
+            if st.get("multi"):
+                print_info("Status", f"{Colors.BRIGHT_GREEN}Running (Multi-Monitor){Colors.RESET}")
+                print_info("Monitors", str(len(st.get("monitors", {}))))
                 print()
-                print_separator()
-                print_info("State file", st.get('state_file', 'unknown'))
-                print_info("Log file", st.get('log_file', 'unknown'))
-                print_info("Process exists", str(st.get('exists', False)))
-                print_info("Is mpvpaper", str(st.get('is_mpvpaper', False)))
+
+                for mon_name, mon_st in st.get("monitors", {}).items():
+                    print_separator("─", 40)
+                    print_info("Monitor", f"{Colors.BRIGHT_WHITE}{mon_name}{Colors.RESET}")
+                    print_info("Status", f"{Colors.BRIGHT_GREEN}Running{Colors.RESET}" if mon_st.get("running") else f"{Colors.BRIGHT_RED}Stopped{Colors.RESET}", indent=1)
+                    print_info("File", mon_st.get('file', 'unknown'), indent=1)
+                    print_info("Mode", mon_st.get('mode', 'auto'), indent=1)
+                    print_info("Process", f"PID={mon_st['pid']}, PGID={mon_st['pgid']}", indent=1)
+
+                    if args.verbose:
+                        print_info("Process exists", str(mon_st.get('exists', False)), indent=1)
+                        print_info("Is mpvpaper", str(mon_st.get('is_mpvpaper', False)), indent=1)
+
+                print_separator("─", 40)
+
+                if args.verbose:
+                    print()
+                    print_info("State file", st.get('state_file', 'unknown'))
+                    print_info("Log file", st.get('log_file', 'unknown'))
+            else:
+                # Single-monitor (legacy)
+                print_info("Status", f"{Colors.BRIGHT_GREEN}Running{Colors.RESET}")
+                print_info("Monitor", st.get('monitor', 'unknown'))
+                print_info("File", st.get('file', 'unknown'))
+                print_info("Mode", st.get('mode', 'auto'))
+                print_info("Process", f"PID={st['pid']}, PGID={st['pgid']}")
+
+                if args.verbose:
+                    print()
+                    print_separator()
+                    print_info("State file", st.get('state_file', 'unknown'))
+                    print_info("Log file", st.get('log_file', 'unknown'))
+                    print_info("Process exists", str(st.get('exists', False)))
+                    print_info("Is mpvpaper", str(st.get('is_mpvpaper', False)))
             print()
 
         elif args.command == "stop":
-            animate_progress("Stopping wallpaper", 0.5)
+            animate_progress("Stopping wallpaper(s)", 0.5)
             was_stopped = runner.stop()
 
             if was_stopped:
-                print_success("Wallpaper stopped successfully")
+                print_success("Wallpaper(s) stopped successfully")
             else:
                 print_warning("No wallpaper process was running")
             print()

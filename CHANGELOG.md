@@ -1,5 +1,62 @@
 # Changelog
 
+## v0.4.0 (2026-01-17) - Multi-Monitor Support
+
+### Added
+- **Multi-Monitor Mode** — Set wallpaper on all monitors with single command
+  - `hyprwall set <file> --all` — Apply wallpaper to all active monitors
+  - Same source file, optimized per resolution automatically
+  - Intelligent caching: one optimization per unique resolution
+- **Multi-Monitor Status** — Enhanced status display
+  - Shows per-monitor information in multi-monitor setups
+  - Displays running state, PID, file, and mode for each monitor
+  - Backward-compatible with single-monitor status
+
+### Changed
+- **State File Format v2** — New multi-monitor state structure
+  - Format: `{"version": 2, "monitors": {...}}`
+  - Automatic v1 → v2 migration on write
+  - Full backward compatibility with existing v1 state files
+- **Session Convention** — Multi-monitor sessions use `monitor="__all__"`
+  - Distinguishes multi-monitor from single-monitor sessions
+  - Enables future auto-power support for multi-monitor
+- **Optimization Logic** — Groups monitors by resolution
+  - Avoids duplicate optimizations for monitors with same resolution
+  - Reuses cache across monitors efficiently
+- **Stop Command** — Simplified to always stop all monitors
+  - `hyprwall stop` — Stops all running wallpapers (multi or single monitor)
+  - Removed per-monitor stop option for simplicity
+
+### Technical Details
+- New `MultiRunState` and `MonitorRunState` dataclasses
+- `start_many()` function for parallel monitor setup
+- State migration is transparent and automatic
+- Cache structure unchanged (per-resolution as before)
+
+### Migration
+- No action required — v1 state files auto-migrate to v2
+- Existing single-monitor setups work unchanged
+- `--all` flag is opt-in for multi-monitor behavior
+
+### Examples
+
+```bash
+# Multi-monitor setup
+hyprwall set wallpaper.mp4 --all --profile balanced
+
+# Stop all wallpapers
+hyprwall stop
+
+# View multi-monitor status
+hyprwall status
+
+# All existing commands still work
+hyprwall set wallpaper.mp4              # Single monitor (default)
+hyprwall set wallpaper.mp4 --monitor HDMI-A-1  # Specific monitor
+```
+
+---
+
 ## v0.3.0 (2026-01-17)
 
 ### Added
