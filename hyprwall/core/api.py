@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Literal
 
 from hyprwall.core import (
+    config,
     detect,
     hypr,
     optimize,
@@ -93,6 +94,50 @@ class HyprwallCore:
             return sorted(items, key=lambda x: x.path.name.lower())
         except Exception:
             return []
+
+    def iter_library(
+        self,
+        directory: Path,
+        recursive: bool = True,
+        batch_size: int = 50,
+    ):
+        """
+        Iterate over supported media files in batches (lazy loading).
+
+        This is the preferred method for GUI to avoid blocking on large directories.
+
+        Args:
+            directory: Directory to scan for media files
+            recursive: If True, scan recursively (default)
+            batch_size: Number of items per batch (default: 50)
+
+        Yields:
+            Lists of MediaItem (batches)
+        """
+        try:
+            if not directory.exists() or not directory.is_dir():
+                return
+
+            files = detect.find_supported_files(directory, recursive=recursive)
+
+            batch = []
+            for file_path in files:
+                kind = "video" if detect.is_video(file_path) else "image"
+                batch.append(MediaItem(path=file_path, kind=kind))
+
+                if len(batch) >= batch_size:
+                    # Sort batch before yielding
+                    batch.sort(key=lambda x: x.path.name.lower())
+                    yield batch
+                    batch = []
+
+            # Yield remaining items
+            if batch:
+                batch.sort(key=lambda x: x.path.name.lower())
+                yield batch
+
+        except Exception:
+            return
 
     def set_wallpaper(
         self,
@@ -379,23 +424,128 @@ class HyprwallCore:
         """Save the current session"""
         session.save_session(sess)
 
-
     def find_media_files(self, directory: Path) -> list[Path]:
         """Find all supported media files (images and videos) in a directory recursively, sorted by name."""
         return detect.find_supported_files(directory, recursive=True)
 
-    def clear_cache(self) -> tuple[int, int]:
+    def cache_size(self) -> dict:
+        """
+        Get cache statistics.
+
+        Returns:
+            Dictionary with cache info:
+            - path: Cache directory path
+            - files: Number of cached files
+            - dirs: Number of subdirectories
+            - size_bytes: Total size in bytes
+            - size_mb: Total size in MB
+        """
+        import os
+
+        cache_path = paths.OPT_DIR
+
+        if not cache_path.exists():
+            return {
+                "path": str(cache_path),
+                "files": 0,
+                "dirs": 0,
+                "size_bytes": 0,
+                "size_mb": 0.0,
+            }
+
+        dirs, files = paths.count_tree(cache_path)
+
+        # Calculate total size
+        total_bytes = 0
+        try:
+            for root, _, filenames in os.walk(cache_path):
+                for filename in filenames:
+                    filepath = Path(root) / filename
+                    try:
+                        total_bytes += filepath.stat().st_size
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        return {
+            "path": str(cache_path),
+            "files": files,
+            "dirs": dirs,
+            "size_bytes": total_bytes,
+            "size_mb": round(total_bytes / (1024 * 1024), 2),
+        }
+
+    def clear_cache(self) -> dict:
         """
         Clear the optimization cache.
+
         Returns:
-            A tuple (number_of_files_deleted, number_of_bytes_freed)
+            Dictionary with result:
+            - success: Whether operation succeeded
+            - files_deleted: Number of files deleted
+            - dirs_deleted: Number of directories deleted
+            - bytes_freed: Bytes freed
         """
         import shutil
-        count = paths.count_tree(paths.OPT_DIR)
-        if paths.OPT_DIR.exists():
-            shutil.rmtree(paths.OPT_DIR)
-            paths.OPT_DIR.mkdir(parents=True, exist_ok=True)
-        return count
+
+        # Get stats before deletion
+        stats_before = self.cache_size()
+        files_before = stats_before["files"]
+        dirs_before = stats_before["dirs"]
+        bytes_before = stats_before["size_bytes"]
+
+        try:
+            if paths.OPT_DIR.exists():
+                shutil.rmtree(paths.OPT_DIR)
+                paths.OPT_DIR.mkdir(parents=True, exist_ok=True)
+
+            return {
+                "success": True,
+                "files_deleted": files_before,
+                "dirs_deleted": dirs_before,
+                "bytes_freed": bytes_before,
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "files_deleted": 0,
+                "dirs_deleted": 0,
+                "bytes_freed": 0,
+            }
+
+    def get_default_library_dir(self) -> Path:
+        """
+        Get the default library directory for GUI.
+
+        Returns the configured directory if valid, otherwise uses intelligent fallback:
+        1. ~/Pictures/wallpapers/Dynamic-Wallpapers/LiveWallpapers/ if exists
+        2. ~/Pictures if exists
+        3. ~ (home directory)
+        """
+        return config.get_default_library_dir()
+
+    def set_default_library_dir(self, path: Path | str) -> bool:
+        """
+        Set the default library directory for GUI.
+
+        Args:
+            path: Directory path to set as default
+
+        Returns:
+            True if saved successfully, False if invalid
+        """
+        return config.set_default_library_dir(path)
+
+    def reset_default_library_dir(self) -> bool:
+        """
+        Reset the default library directory to fallback behavior.
+
+        Returns:
+            True if reset successfully
+        """
+        return config.reset_default_library_dir()
 
 
 # Singleton instance

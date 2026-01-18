@@ -1,5 +1,92 @@
 # Changelog
 
+## v0.6.0 (2026-01-18) - GUI Performance & UX Improvements
+
+### Added
+- **Pagination System** — Gallery and list views now paginated (15 items per page)
+  - Prev/Next navigation buttons with page indicator
+  - Automatic pagination bar visibility (hidden for ≤15 items)
+  - Dramatically improves performance for large wallpaper folders
+  - Prevents UI freeze when loading 100+ wallpapers
+- **Single File Preview Mode** — Dedicated view for individually selected files
+  - Clear thumbnail preview for chosen file (images and videos)
+  - File information display (name, type, path)
+  - Supports both Gallery and List view modes
+  - Pagination bar automatically hidden in single file mode
+- **Loading Screen** — Professional loading indicator during library scan
+  - Animated spinner with "Loading wallpapers..." message
+  - Helpful hint: "Large folders can take a while"
+  - Smooth crossfade transitions between loading/content states
+  - Prevents window layout jump during async loading
+- **Default Library Folder** — Auto-load wallpaper library on startup
+  - Configurable default folder persisted in `~/.config/hyprwall/gui_config.json`
+  - Intelligent fallback: `~/Pictures/wallpapers/.../LiveWallpapers` → `~/Pictures` → `~`
+  - Menu action "Reset Default Folder" to restore fallback behavior
+  - Eliminates need to re-select folder on every launch
+- **Cache Management** — GUI actions for cache control
+  - Menu: "Cache Size" displays optimization cache statistics
+  - Menu: "Clear Cache" with confirmation dialog
+  - Integrates with existing core cache system
+
+### Changed
+- **Library Loading Redesigned** — Non-blocking async architecture
+  - Background thread scanning with `core.iter_library()`
+  - Main thread remains responsive during scan
+  - Window geometry frozen during load (prevents Wayland recentering)
+  - All items loaded before rendering (no progressive pop-in)
+- **View Toggle Consistency** — Gallery/List buttons work in all modes
+  - Single file preview supports both Gallery and List views
+  - Folder library supports both Gallery and List views
+  - View mode preserved when switching between file/folder
+- **Window Stability** — Multiple fixes for layout jump issues
+  - `library_container` always visible (no hide/show)
+  - `library_outer_stack` with loading/single_file/content pages
+  - Window size frozen during loading via `set_size_request()`
+  - ScrolledWindow `propagate-natural-height=false`
+  - Minimum height reserved for library area (340px)
+
+### Fixed
+- **Layout Jump Eliminated** — Window no longer repositions during loading
+  - Root cause: `propagate-natural-height` causing geometry recalculation
+  - Solution: Stable layout with frozen window size during operations
+  - Tested on Wayland (Hyprland) with large wallpaper collections
+- **FlowBox Placeholder Issue** — Loading placeholder properly removed
+  - Used `get_first_child()` / `get_next_sibling()` GTK4 iteration
+  - Placeholder removal happens before first batch render
+  - Eliminates visual glitches during lazy loading
+- **File vs Folder Confusion** — Clear UI distinction
+  - "Choose file..." now shows single file preview (not folder gallery)
+  - "Choose folder..." returns to folder library view
+  - No more ambiguity about selected source
+
+### Technical Details
+- **Pagination Implementation:**
+  - State: `_all_items`, `_page_size=15`, `_page_index`, `_total_pages`
+  - Method: `_render_current_page()` slices items array
+  - Thumbnails generated only for current page (max 15 at once)
+  - Pagination bar styled with GTK toolbar class
+- **Single File Preview:**
+  - `single_file_view_stack` with gallery/list pages
+  - Reuses `_make_picture_from_file()` and `_ensure_video_thumb()`
+  - Thumbnail cache shared with folder library
+- **Loading Architecture:**
+  - `library_outer_stack`: loading → single_file → content
+  - `_scan_library_thread()` runs in background
+  - `GLib.idle_add()` for all GTK updates from thread
+  - `_freeze_window_size()` / `_unfreeze_window_size()` guards
+- **Performance:**
+  - 15 thumbnails vs 200+ = 13x faster initial load
+  - Background scanning keeps UI responsive
+  - Smart caching avoids redundant video frame extraction
+
+### Migration
+- **No breaking changes** — All existing functionality preserved
+- GUI config stored in new file: `~/.config/hyprwall/gui_config.json`
+- First launch auto-detects default wallpaper folder
+- Pagination automatically enabled (no configuration needed)
+
+---
+
 ## v0.5.0 (2026-01-18) - GUI Overhaul & Global-Only Mode
 
 ### Added

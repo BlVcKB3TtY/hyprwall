@@ -1,16 +1,41 @@
-/* HyprWall Custom Styles */
+/* HyprWall Custom Styles - Wallpaper Engine inspired */
 
-.wallpaper-preview {
-    border-radius: 12px;
-    border: 1px solid rgba(0, 0, 0, 0.1);
+/* Main layout panels */
+.main-content {
+    padding: 18px;
 }
 
+.library-panel {
+    padding: 10px;
+    border-radius: 16px;
+    background-color: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.control-panel {
+    padding: 12px;
+    border-radius: 16px;
+    background-color: rgba(0, 0, 0, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.action-bar button {
+    min-width: 110px;
+    border-radius: 12px;
+}
+
+.status-bar {
+    opacity: 0.85;
+}
+
+/* Monitor info */
 .monitor-card {
     padding: 12px;
     border-radius: 8px;
     background-color: rgba(255, 255, 255, 0.05);
 }
 
+/* Status colors */
 .status-running {
     color: #26a269;
 }
@@ -19,6 +44,51 @@
     color: #f6d32d;
 }
 
-.main-content {
-    padding: 12px;
+/* Selected file label */
+.selected-ok {
+    color: rgba(255, 255, 255, 0.92);
+}
+
+.selected-none {
+    opacity: 0.6;
+}
+
+/* Gallery view cards - Premium volume styling */
+.wallpaper-card {
+    padding: 10px;
+    border-radius: 14px;
+    background-color: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    transition: all 150ms ease-out;
+}
+
+.wallpaper-card:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.14);
+    transform: translateY(-1px);
+}
+
+/* Selection state - FIXED pseudo-class selector */
+flowboxchild:selected .wallpaper-card {
+    background-color: rgba(53, 132, 228, 0.16);
+    border-color: rgba(53, 132, 228, 0.85);
+}
+
+/* Keyboard focus state */
+flowboxchild:focus-within .wallpaper-card {
+    outline: 2px solid rgba(53, 132, 228, 0.6);
+    outline-offset: 2px;
+}
+
+/* Thumbnail container */
+.wallpaper-thumb {
+    border-radius: 12px;
+    background-color: rgba(0, 0, 0, 0.22);
+}
+
+/* Card title */
+.wallpaper-title {
+    font-size: 0.95em;
+    padding-top: 6px;
+    opacity: 0.92;
 }

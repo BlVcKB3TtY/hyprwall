@@ -77,28 +77,80 @@ hyprwall cache clear
 
 ### GUI
 
+#### Installation
+
+After installing HyprWall with GUI support, create a desktop entry for proper integration:
+
 ```bash
-# Launch GUI
-hyprwall-gui
+# Create desktop applications directory
+mkdir -p ~/.local/share/applications
+
+# Create desktop entry
+cat > ~/.local/share/applications/hyprwall.desktop << 'EOF'
+[Desktop Entry]
+Type=Application
+Name=HyprWall
+Comment=Local Wallpaper Engine for Hyprland
+Exec=hyprwall-gui
+Icon=preferences-desktop-wallpaper
+Terminal=false
+StartupNotify=true
+Categories=Utility;Settings;
+EOF
+
+# Update desktop database
+update-desktop-database ~/.local/share/applications >/dev/null 2>&1 || true
 ```
 
-**Features:**
-- File chooser dialog for individual wallpapers
-- Folder browser with library view for wallpaper collections
-- Live monitor detection display
-- Mode selection (auto/fit/cover/stretch)
-- Profile selection (off/eco/balanced/quality)
-- Auto-power toggle for battery-aware optimization
-- Real-time status display
+#### Launch
 
-**Usage:**
-1. Click "Choose file" to select a single wallpaper
-2. OR click "Choose folder" to browse a wallpaper library
-3. Select mode, profile, and auto-power options
-4. Click "Start" to apply wallpaper to all monitors
-5. Click "Stop" to remove wallpapers
+HyprWall GUI is meant to be launched as a desktop application from your application menu.
 
-**Note:** Wallpapers always apply to all monitors (global-only mode).
+**Note:** If you run `hyprwall-gui` from a terminal, you may see GTK theme warnings. These are normal and come from the GTK theme system, not from HyprWall. Use the desktop launcher for the best experience.
+
+#### Features
+
+- **File chooser** — Select individual wallpapers (images or videos)
+- **Folder browser** — Browse wallpaper collections with thumbnail gallery
+- **Pagination** — Gallery displays 15 items per page for smooth performance
+- **Loading screen** — Professional spinner during library scanning
+- **Single file preview** — Clear preview of individually selected files
+- **View modes** — Toggle between Gallery (thumbnails) and List (details) views
+- **Live monitor detection** — Shows all connected displays
+- **Mode selection** — Choose rendering mode (auto/fit/cover/stretch)
+- **Profile selection** — Set optimization profile (off/eco/balanced/quality)
+- **Auto-power toggle** — Enable battery-aware automatic profile switching
+- **Real-time status** — Shows currently running wallpapers per monitor
+- **Cache management** — View cache size and clear optimized files
+
+#### Usage
+
+1. **Choose a wallpaper:**
+   - Click "Choose file..." to select a single wallpaper
+   - OR click "Choose folder..." to browse a wallpaper library
+   
+2. **Configure options:**
+   - **Mode:** How wallpaper fits the screen (auto/fit/cover/stretch)
+   - **Profile:** Optimization level (off/eco/balanced/quality)
+   - **Codec:** Video encoding format (h264/vp9/av1)
+   - **Encoder:** Encoding backend (auto/cpu/nvenc/vaapi)
+   - **Auto-power:** Enable battery-aware profile switching
+
+3. **Apply wallpaper:**
+   - Click "Start" to apply wallpaper to all monitors
+   - Click "Stop" to remove wallpapers
+
+4. **Navigate library:**
+   - Use Gallery/List toggle buttons to switch views
+   - Use Prev/Next buttons to navigate pages (if >15 items)
+   - Click any thumbnail to select that wallpaper
+
+5. **Manage cache:**
+   - Menu → Cache Size (shows statistics)
+   - Menu → Clear Cache (removes optimized files)
+   - Menu → Reset Default Folder (clears saved library path)
+
+**Important:** Wallpapers always apply to all monitors (global-only mode). There is no per-monitor selection.
 ---
 
 ## Architecture
@@ -127,9 +179,31 @@ hyprwall/
 
 ## Configuration
 
+### File Locations
+
 - **Config**: `~/.config/hyprwall/`
+  - `gui_config.json` — GUI preferences (default library folder)
 - **Cache**: `~/.cache/hyprwall/optimized/`
+  - Video thumbnails for GUI gallery
+  - Optimized video files per resolution/profile
 - **State**: `~/.cache/hyprwall/state/`
+  - `session.json` — Last wallpaper session
+  - `state.json` — Running wallpaper processes
+
+### GUI Configuration
+
+The GUI automatically saves preferences:
+
+- **Default library folder** — Last selected folder for "Choose folder..."
+  - Saved in `~/.config/hyprwall/gui_config.json`
+  - Auto-loads on startup for instant access
+  - Fallback: `~/Pictures/wallpapers/.../LiveWallpapers` → `~/Pictures` → `~`
+
+- **View mode** — Gallery or List view preference (preserved in session)
+
+- **Pagination** — Automatically enabled for folders with >15 items
+  - Page size: 15 items (optimal for performance)
+  - Navigation: Prev/Next buttons + page indicator
 
 ### Optimization Profiles
 
@@ -139,6 +213,21 @@ hyprwall/
 | `eco` | 24 | 28 CRF | ≤40% |
 | `balanced` | 30 | 24 CRF | Default |
 | `quality` | 30 | 20 CRF | AC power |
+
+**Profile "off"** skips video optimization entirely (uses source file directly).
+
+### Codec & Encoder Selection
+
+**Codecs:**
+- `h264` — MP4 format (default, best compatibility)
+- `vp9` — WebM format (good compression)
+- `av1` — Modern codec (requires hardware support)
+
+**Encoders:**
+- `auto` — Smart selection (hardware if available, CPU fallback)
+- `cpu` — Software encoding (libx264/libvpx-vp9)
+- `nvenc` — NVIDIA GPU acceleration (H.264 only)
+- `vaapi` — AMD/Intel GPU acceleration (AV1 recommended)
 
 ---
 

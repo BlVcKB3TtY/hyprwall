@@ -15,6 +15,9 @@
     <property name="margin-bottom">12</property>
     <property name="margin-start">12</property>
     <property name="margin-end">12</property>
+    <style>
+      <class name="main-content"/>
+    </style>
 
     <child>
       <object class="GtkLabel">
@@ -97,19 +100,294 @@
     </child>
 
     <child>
-      <object class="GtkScrolledWindow" id="library_scroll">
+      <object class="GtkBox" id="library_container">
+        <property name="orientation">vertical</property>
+        <property name="spacing">6</property>
+        <property name="visible">true</property>
         <property name="vexpand">true</property>
-        <property name="hexpand">true</property>
-        <property name="max-content-height">200</property>
-        <property name="propagate-natural-height">true</property>
-        <property name="visible">false</property>
+        <property name="height-request">340</property>
+        <style>
+          <class name="library-panel"/>
+        </style>
 
         <child>
-          <object class="GtkListBox" id="library_list">
-            <property name="selection-mode">single</property>
+          <object class="GtkBox">
+            <property name="orientation">horizontal</property>
+            <property name="spacing">6</property>
+            <property name="margin-bottom">6</property>
+
+            <child>
+              <object class="GtkLabel">
+                <property name="label">Library:</property>
+                <property name="hexpand">true</property>
+                <property name="xalign">0</property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">3</property>
+                <style>
+                  <class name="linked"/>
+                </style>
+
+                <child>
+                  <object class="GtkToggleButton" id="view_mode_gallery">
+                    <property name="label">Gallery</property>
+                    <property name="active">true</property>
+                    <property name="tooltip-text">Gallery view</property>
+                  </object>
+                </child>
+
+                <child>
+                  <object class="GtkToggleButton" id="view_mode_list">
+                    <property name="label">List</property>
+                    <property name="group">view_mode_gallery</property>
+                    <property name="tooltip-text">List view</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <!-- Pagination bar -->
+        <child>
+          <object class="GtkBox" id="pagination_bar">
+            <property name="orientation">horizontal</property>
+            <property name="spacing">12</property>
+            <property name="halign">center</property>
+            <property name="margin-top">6</property>
+            <property name="margin-bottom">6</property>
+            <property name="visible">false</property>
             <style>
-              <class name="boxed-list"/>
+              <class name="toolbar"/>
             </style>
+
+            <child>
+              <object class="GtkButton" id="page_prev">
+                <property name="label">◀ Prev</property>
+                <property name="sensitive">false</property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkLabel" id="page_label">
+                <property name="label">Page 1 / 1</property>
+                <style>
+                  <class name="title-4"/>
+                </style>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkButton" id="page_next">
+                <property name="label">Next ▶</property>
+                <property name="sensitive">false</property>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <child>
+          <object class="GtkStack" id="library_outer_stack">
+            <property name="vexpand">true</property>
+            <property name="hexpand">true</property>
+            <property name="transition-type">crossfade</property>
+            <property name="transition-duration">200</property>
+
+            <!-- Loading page -->
+            <child>
+              <object class="GtkStackPage">
+                <property name="name">loading</property>
+                <property name="child">
+                  <object class="GtkBox">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">12</property>
+                    <property name="valign">center</property>
+                    <property name="halign">center</property>
+                    <property name="vexpand">true</property>
+                    <property name="hexpand">true</property>
+
+                    <child>
+                      <object class="GtkSpinner">
+                        <property name="spinning">true</property>
+                        <property name="width-request">32</property>
+                        <property name="height-request">32</property>
+                      </object>
+                    </child>
+
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="label">Loading wallpapers…</property>
+                        <style>
+                          <class name="title-4"/>
+                        </style>
+                      </object>
+                    </child>
+
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="label">Large folders can take a while</property>
+                        <style>
+                          <class name="dim-label"/>
+                          <class name="caption"/>
+                        </style>
+                      </object>
+                    </child>
+                  </object>
+                </property>
+              </object>
+            </child>
+
+            <!-- Single file preview page -->
+            <child>
+              <object class="GtkStackPage">
+                <property name="name">single_file</property>
+                <property name="child">
+                  <object class="GtkBox">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">6</property>
+                    <property name="vexpand">true</property>
+                    <property name="hexpand">true</property>
+
+                    <child>
+                      <object class="GtkLabel">
+                        <property name="label">Single File Selected</property>
+                        <property name="margin-bottom">6</property>
+                        <style>
+                          <class name="title-4"/>
+                        </style>
+                      </object>
+                    </child>
+
+                    <child>
+                      <object class="GtkStack" id="single_file_view_stack">
+                        <property name="vexpand">true</property>
+                        <property name="hexpand">true</property>
+                        <property name="transition-type">crossfade</property>
+
+                        <!-- Gallery view for single file -->
+                        <child>
+                          <object class="GtkStackPage">
+                            <property name="name">gallery</property>
+                            <property name="child">
+                              <object class="GtkBox">
+                                <property name="orientation">vertical</property>
+                                <property name="spacing">8</property>
+                                <property name="valign">center</property>
+                                <property name="halign">center</property>
+                                <property name="vexpand">true</property>
+                                <property name="hexpand">true</property>
+
+                                <child>
+                                  <object class="GtkBox" id="single_file_preview_box">
+                                    <property name="orientation">vertical</property>
+                                    <property name="spacing">8</property>
+                                    <property name="halign">center</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+
+                        <!-- List view for single file -->
+                        <child>
+                          <object class="GtkStackPage">
+                            <property name="name">list</property>
+                            <property name="child">
+                              <object class="GtkScrolledWindow">
+                                <property name="vexpand">true</property>
+                                <property name="hexpand">true</property>
+
+                                <child>
+                                  <object class="GtkListBox" id="single_file_list">
+                                    <property name="selection-mode">none</property>
+                                    <style>
+                                      <class name="boxed-list"/>
+                                    </style>
+                                  </object>
+                                </child>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </property>
+              </object>
+            </child>
+
+            <!-- Content page (existing library_stack) -->
+            <child>
+              <object class="GtkStackPage">
+                <property name="name">content</property>
+                <property name="child">
+                  <object class="GtkStack" id="library_stack">
+                    <property name="vexpand">true</property>
+                    <property name="hexpand">true</property>
+                    <property name="transition-type">crossfade</property>
+
+            <child>
+              <object class="GtkStackPage">
+                <property name="name">gallery</property>
+                <property name="child">
+                  <object class="GtkScrolledWindow" id="library_scroll_grid">
+                    <property name="vexpand">true</property>
+                    <property name="hexpand">true</property>
+                    <property name="min-content-height">300</property>
+                    <property name="propagate-natural-height">false</property>
+
+                    <child>
+                      <object class="GtkFlowBox" id="library_grid">
+                        <property name="selection-mode">single</property>
+                        <property name="max-children-per-line">5</property>
+                        <property name="min-children-per-line">2</property>
+                        <property name="row-spacing">12</property>
+                        <property name="column-spacing">12</property>
+                        <property name="halign">center</property>
+                        <property name="valign">start</property>
+                        <property name="homogeneous">true</property>
+                        <property name="margin-start">6</property>
+                        <property name="margin-end">6</property>
+                        <property name="margin-top">6</property>
+                        <property name="margin-bottom">6</property>
+                      </object>
+                    </child>
+                  </object>
+                </property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkStackPage">
+                <property name="name">list</property>
+                <property name="child">
+                  <object class="GtkScrolledWindow" id="library_scroll_list">
+                    <property name="vexpand">true</property>
+                    <property name="hexpand">true</property>
+                    <property name="min-content-height">300</property>
+                    <property name="propagate-natural-height">false</property>
+
+                    <child>
+                      <object class="GtkListBox" id="library_list">
+                        <property name="selection-mode">single</property>
+                        <style>
+                          <class name="boxed-list"/>
+                        </style>
+                      </object>
+                    </child>
+                  </object>
+                </property>
+              </object>
+            </child>
+          </object>
+                </property>
+              </object>
+            </child>
           </object>
         </child>
       </object>
@@ -119,6 +397,9 @@
       <object class="GtkBox">
         <property name="orientation">vertical</property>
         <property name="spacing">6</property>
+        <style>
+          <class name="control-panel"/>
+        </style>
 
         <child>
           <object class="GtkBox">
@@ -190,6 +471,69 @@
 
             <child>
               <object class="GtkLabel">
+                <property name="label">Codec:</property>
+                <property name="width-chars">12</property>
+                <property name="xalign">0</property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkDropDown" id="codec_dropdown">
+                <property name="hexpand">true</property>
+                <property name="model">
+                  <object class="GtkStringList">
+                    <items>
+                      <item>h264</item>
+                      <item>vp9</item>
+                      <item>av1</item>
+                    </items>
+                  </object>
+                </property>
+                <property name="selected">0</property>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">horizontal</property>
+            <property name="spacing">6</property>
+
+            <child>
+              <object class="GtkLabel">
+                <property name="label">Encoder:</property>
+                <property name="width-chars">12</property>
+                <property name="xalign">0</property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkDropDown" id="encoder_dropdown">
+                <property name="hexpand">true</property>
+                <property name="model">
+                  <object class="GtkStringList">
+                    <items>
+                      <item>auto</item>
+                      <item>cpu</item>
+                      <item>vaapi</item>
+                      <item>nvenc</item>
+                    </items>
+                  </object>
+                </property>
+                <property name="selected">0</property>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">horizontal</property>
+            <property name="spacing">6</property>
+
+            <child>
+              <object class="GtkLabel">
                 <property name="label">Auto-power:</property>
                 <property name="width-chars">12</property>
                 <property name="xalign">0</property>
@@ -223,6 +567,9 @@
         <property name="orientation">horizontal</property>
         <property name="spacing">6</property>
         <property name="halign">center</property>
+        <style>
+          <class name="action-bar"/>
+        </style>
 
         <child>
           <object class="GtkButton" id="start_button">
@@ -249,6 +596,7 @@
         <property name="label">No wallpaper running</property>
         <style>
           <class name="dim-label"/>
+          <class name="status-bar"/>
         </style>
       </object>
     </child>
