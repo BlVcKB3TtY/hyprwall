@@ -92,3 +92,21 @@ flowboxchild:focus-within .wallpaper-card {
     padding-top: 6px;
     opacity: 0.92;
 }
+
+/* Now Playing view */
+.now-playing-panel {
+    padding: 12px;
+}
+
+.now-playing-card {
+    border-radius: 14px;
+}
+
+.now-playing-title {
+    margin-bottom: 8px;
+}
+
+/* Now Playing preview image */
+.now-playing-preview picture {
+    border-radius: 12px;
+}

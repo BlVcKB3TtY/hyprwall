@@ -1,5 +1,57 @@
 # Changelog
 
+## v0.6.1 (2026-01-18) - Now Playing View & Enhanced Status
+
+### Added
+- **Now Playing View** — Dedicated tab for real-time wallpaper status
+  - Clean navigation with Adw.ViewSwitcher between Library and Now Playing
+  - Live wallpaper preview (image thumbnails or video frame extraction)
+  - Detailed status per monitor: name, resolution, file, mode, PID
+  - Session information: profile, codec, encoder, auto-power status
+  - Auto-refresh every 2 seconds when view is visible
+  - Empty state with helpful message when no wallpaper running
+  - Professional "engine-ish" card layout with proper styling
+- **Video Thumbnails in Status** — Now Playing shows preview for all media types
+  - Images: scaled preview (400x225 for main view)
+  - Videos: extracted frame at 1s via ffmpeg (320x180 cached)
+  - Fallback: icon display if thumbnail generation fails
+  - Reuses existing thumbnail cache system from gallery
+
+### Changed
+- **Main UI Navigation** — Reorganized for better workflow
+  - Library view contains file/folder choosers and wallpaper browser
+  - Now Playing view shows active wallpaper status and info
+  - File/folder selection UI moved into Library tab
+- **Status Display Simplified** — Removed redundant status label
+  - Status info (file, mode, PID) moved entirely to Now Playing tab
+  - Cleaner interface with no duplicate information
+  - Status label below Start/Stop buttons removed
+  - All detailed status now centralized in Now Playing view
+- **Status Refresh Logic** — Improved responsiveness
+  - Now Playing view refreshes on Start/Stop actions
+  - Timer-based auto-refresh (2s) only runs when view is visible
+  - Timer cleanup on view switch (prevents unnecessary updates)
+  - Manual refresh option via view switch
+- **CSS Styling** — Enhanced visual hierarchy
+  - `.now-playing-panel` for container styling
+  - `.now-playing-card` for info list boxes
+  - `.now-playing-title` for section headers
+  - Consistent with existing Wallpaper Engine-inspired theme
+
+### Fixed
+- **Signal Connection Bug** — Now Playing view now refreshes properly
+  - Fixed missing GTK signal connection for view change
+  - `notify::visible-child-name` signal now properly connected
+  - Auto-initialization at startup for already-running wallpapers
+  - Robust widget checking prevents crashes
+
+### Technical
+- **Architecture** — Clean separation of concerns
+  - All status logic via `core.get_status()` and `core.load_session()`
+  - No business logic in GUI layer
+  - Proper GTK4/libadwaita patterns (AdwViewStack, AdwViewSwitcher)
+  - Signal-based view change handling with timer management
+
 ## v0.6.0 (2026-01-18) - GUI Performance & UX Improvements
 
 ### Added

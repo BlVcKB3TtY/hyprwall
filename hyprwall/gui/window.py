@@ -155,7 +155,12 @@ class HyprwallWindow(Adw.ApplicationWindow):
         self.folder_chooser_button = builder.get_object("folder_chooser_button")
         self.selected_label = builder.get_object("selected_label")
 
+        # Main view stack and switcher
+        self.main_view_stack = builder.get_object("main_view_stack")
+        self.view_switcher = builder.get_object("view_switcher")
+
         # Library views
+        self.library_page = builder.get_object("library_page")
         self.library_container = builder.get_object("library_container")
         self.library_outer_stack = builder.get_object("library_outer_stack")
         self.library_stack = builder.get_object("library_stack")
@@ -167,6 +172,12 @@ class HyprwallWindow(Adw.ApplicationWindow):
         self.single_file_view_stack = builder.get_object("single_file_view_stack")
         self.single_file_list = builder.get_object("single_file_list")
 
+        # Now Playing views
+        self.now_playing_container = builder.get_object("now_playing_container")
+        self.now_playing_preview_container = builder.get_object("now_playing_preview_container")
+        self.now_playing_info_list = builder.get_object("now_playing_info_list")
+        self.now_playing_empty_state = builder.get_object("now_playing_empty_state")
+
         # Pagination
         self.pagination_bar = builder.get_object("pagination_bar")
         self.page_prev = builder.get_object("page_prev")
@@ -177,7 +188,7 @@ class HyprwallWindow(Adw.ApplicationWindow):
         self.view_mode_gallery = builder.get_object("view_mode_gallery")
         self.view_mode_list = builder.get_object("view_mode_list")
 
-        self.status_label = builder.get_object("status_label")
+        # Controls
         self.mode_dropdown = builder.get_object("mode_dropdown")
         self.profile_dropdown = builder.get_object("profile_dropdown")
         self.codec_dropdown = builder.get_object("codec_dropdown")
@@ -193,6 +204,9 @@ class HyprwallWindow(Adw.ApplicationWindow):
         self._page_size = 15
         self._page_index = 0
         self._total_pages = 1
+
+        # Now Playing refresh timer ID
+        self._now_playing_timer = None
 
         # Get content
         content = builder.get_object("window_content")
@@ -246,6 +260,10 @@ class HyprwallWindow(Adw.ApplicationWindow):
         if self.view_mode_list:
             self.view_mode_list.connect("toggled", self._on_view_mode_changed)
 
+        # Main view stack - refresh Now Playing when switched to
+        if self.main_view_stack:
+            self.main_view_stack.connect("notify::visible-child-name", self._on_main_view_changed)
+
         # Pagination
         if hasattr(self, 'page_prev') and self.page_prev:
             self.page_prev.connect("clicked", self._on_page_prev)
@@ -281,6 +299,10 @@ class HyprwallWindow(Adw.ApplicationWindow):
 
         # Auto-load default library directory at startup
         self._auto_load_default_library()
+
+        # Initialize Now Playing view (in case wallpaper is already running)
+        if hasattr(self, '_refresh_now_playing'):
+            GLib.idle_add(self._refresh_now_playing)
 
     def _freeze_window_size(self):
         """Freeze window size to prevent repositioning during content changes"""
@@ -449,11 +471,6 @@ class HyprwallWindow(Adw.ApplicationWindow):
         button_box.append(self.stop_button)
 
         content.append(button_box)
-
-        # Status
-        self.status_label = Gtk.Label(label="No wallpaper running")
-        self.status_label.add_css_class("dim-label")
-        content.append(self.status_label)
 
         # Toolbar view to combine header + content
         toolbar_view = Adw.ToolbarView()
@@ -727,10 +744,6 @@ class HyprwallWindow(Adw.ApplicationWindow):
         if hasattr(self, 'library_outer_stack') and self.library_outer_stack:
             self.library_outer_stack.set_visible_child_name("loading")
 
-        # Update status label
-        if hasattr(self, 'status_label') and self.status_label:
-            self.status_label.set_label("Loading wallpapers...")
-
         if LAZY_LIBRARY_LOADING:
             # === LAZY MODE (background thread) ===
             # Freeze window size to prevent Wayland recentering
@@ -905,9 +918,8 @@ class HyprwallWindow(Adw.ApplicationWindow):
             self._render_current_page()
 
     def _reset_status(self):
-        """Reset status label to normal state"""
-        if self.status_label:
-            self._refresh_status()
+        """Reset status - refresh Now Playing if visible"""
+        self._refresh_status()
         return False
 
     def _on_library_scan_complete(self):
@@ -1278,6 +1290,10 @@ class HyprwallWindow(Adw.ApplicationWindow):
 
             if success:
                 self._refresh_status()
+                # Refresh Now Playing if visible
+                if hasattr(self, 'main_view_stack') and self.main_view_stack:
+                    if self.main_view_stack.get_visible_child_name() == "now_playing":
+                        self._refresh_now_playing()
             else:
                 self._show_error("Failed to start wallpaper")
         except Exception as e:
@@ -1287,29 +1303,17 @@ class HyprwallWindow(Adw.ApplicationWindow):
         """Stop wallpaper on all monitors (global-only)"""
         self.core.stop_wallpaper()
         self._refresh_status()
+        # Refresh Now Playing if visible
+        if hasattr(self, 'main_view_stack') and self.main_view_stack:
+            if self.main_view_stack.get_visible_child_name() == "now_playing":
+                self._refresh_now_playing()
 
     def _refresh_status(self):
-        """Update the status display with wallpaper state (calls core API only)"""
-        # Call core API - no business logic here
-        status = self.core.get_status()
-
-        if status.running and status.monitors:
-            # Build detailed status text
-            lines = ["Status: Running"]
-
-            for name, mon_status in status.monitors.items():
-                file_name = Path(mon_status.file).name if mon_status.file else "unknown"
-                mode = mon_status.mode or "auto"
-                pid = mon_status.pid if mon_status.pid else "N/A"
-
-                lines.append(f"  {name}:")
-                lines.append(f"    File: {file_name}")
-                lines.append(f"    Mode: {mode}")
-                lines.append(f"    PID: {pid}")
-
-            self.status_label.set_label("\n".join(lines))
-        else:
-            self.status_label.set_label("Status: Stopped")
+        """Refresh Now Playing view if visible (status info moved to Now Playing tab)"""
+        # Refresh Now Playing if visible
+        if hasattr(self, 'main_view_stack') and self.main_view_stack:
+            if self.main_view_stack.get_visible_child_name() == "now_playing":
+                self._refresh_now_playing()
 
     def _show_error(self, message: str):
         """Display an error message"""
@@ -1422,3 +1426,245 @@ class HyprwallWindow(Adw.ApplicationWindow):
                 self._show_error("Failed to reset default folder")
         except Exception as e:
             self._show_error(f"Failed to reset default folder: {e}")
+
+    # ===== NOW PLAYING VIEW =====
+
+    def _on_main_view_changed(self, stack, param):
+        """Called when main view stack changes (Library <-> Now Playing)"""
+        visible_child = stack.get_visible_child_name()
+
+        if visible_child == "now_playing":
+            # Refresh Now Playing view when switched to
+            self._refresh_now_playing()
+
+            # Start auto-refresh timer (every 2 seconds)
+            if self._now_playing_timer:
+                GLib.source_remove(self._now_playing_timer)
+            self._now_playing_timer = GLib.timeout_add_seconds(2, self._refresh_now_playing_timer)
+        else:
+            # Stop timer when leaving Now Playing view
+            if self._now_playing_timer:
+                GLib.source_remove(self._now_playing_timer)
+                self._now_playing_timer = None
+
+    def _refresh_now_playing_timer(self):
+        """Timer callback for auto-refreshing Now Playing view"""
+        if self.main_view_stack and self.main_view_stack.get_visible_child_name() == "now_playing":
+            self._refresh_now_playing()
+            return True  # Continue timer
+        return False  # Stop timer
+
+    def _refresh_now_playing(self):
+        """Refresh the Now Playing view with current status (calls core API only)"""
+        # Check if widgets are properly initialized
+        if not hasattr(self, 'now_playing_container') or not self.now_playing_container:
+            return False
+
+        try:
+            # Get status from core
+            status = self.core.get_status()
+
+            if not status.running or not status.monitors:
+                self._show_now_playing_empty()
+            else:
+                self._show_now_playing_content(status)
+        except Exception as e:
+            self._show_now_playing_empty()
+            return False
+
+    def _show_now_playing_empty(self):
+        """Show empty state (no wallpaper running)"""
+        if not self.now_playing_empty_state:
+            return
+
+        # Hide preview and info
+        if self.now_playing_preview_container:
+            # Clear preview
+            child = self.now_playing_preview_container.get_first_child()
+            while child:
+                next_child = child.get_next_sibling()
+                self.now_playing_preview_container.remove(child)
+                child = next_child
+
+        if self.now_playing_info_list:
+            # Clear info list
+            while True:
+                row = self.now_playing_info_list.get_row_at_index(0)
+                if row is None:
+                    break
+                self.now_playing_info_list.remove(row)
+
+        # Show empty state
+        self.now_playing_empty_state.set_visible(True)
+
+    def _show_now_playing_content(self, status):
+        """Show Now Playing content with current wallpaper status"""
+        if not self.now_playing_container:
+            return
+
+        # Hide empty state
+        if self.now_playing_empty_state:
+            self.now_playing_empty_state.set_visible(False)
+
+        # Load session for additional info (profile, codec, encoder)
+        sess = self.core.load_session()
+
+        # Get first monitor to show preview
+        first_monitor = next(iter(status.monitors.values()), None)
+
+        # === PREVIEW ===
+        if self.now_playing_preview_container and first_monitor and first_monitor.file:
+            # Clear existing preview
+            child = self.now_playing_preview_container.get_first_child()
+            while child:
+                next_child = child.get_next_sibling()
+                self.now_playing_preview_container.remove(child)
+                child = next_child
+
+            file_path = Path(first_monitor.file)
+            if file_path.exists():
+                # Try to show preview (image or video thumbnail)
+                from hyprwall.core import detect
+                is_video = detect.is_video(file_path)
+
+                if is_video:
+                    # Try video thumbnail
+                    thumb_path = _ensure_video_thumb(file_path, 320, 180)
+                    if thumb_path:
+                        picture = _make_picture_from_file(thumb_path, 320, 180, cover=True)
+                        if picture:
+                            picture.set_size_request(320, 180)
+                            picture.add_css_class("wallpaper-thumb")
+                            self.now_playing_preview_container.append(picture)
+                    else:
+                        # Fallback: video icon
+                        icon = Gtk.Image.new_from_icon_name("video-x-generic-symbolic")
+                        icon.set_pixel_size(64)
+                        icon.add_css_class("dim-label")
+                        self.now_playing_preview_container.append(icon)
+                else:
+                    # Image preview
+                    picture = _make_picture_from_file(file_path, 400, 225, cover=True)
+                    if picture:
+                        picture.set_size_request(400, 225)
+                        picture.add_css_class("wallpaper-thumb")
+                        self.now_playing_preview_container.append(picture)
+
+                # Filename label
+                filename_label = Gtk.Label(label=file_path.name)
+                filename_label.set_wrap(True)
+                filename_label.set_max_width_chars(50)
+                filename_label.add_css_class("title-3")
+                self.now_playing_preview_container.append(filename_label)
+
+        # === INFO LIST ===
+        if self.now_playing_info_list:
+            # Clear existing info
+            while True:
+                row = self.now_playing_info_list.get_row_at_index(0)
+                if row is None:
+                    break
+                self.now_playing_info_list.remove(row)
+
+            # Running status
+            self._add_now_playing_info_row("Status", "Running" if status.running else "Stopped")
+
+            # Monitor-specific info
+            monitors = self.core.list_monitors()
+            monitor_map = {m.name: m for m in monitors}
+
+            for mon_name, mon_status in status.monitors.items():
+                # Section separator
+                separator_row = Gtk.ListBoxRow()
+                separator_label = Gtk.Label(label=f"Monitor: {mon_name}")
+                separator_label.set_xalign(0)
+                separator_label.set_margin_top(8)
+                separator_label.set_margin_bottom(4)
+                separator_label.set_margin_start(12)
+                separator_label.set_margin_end(12)
+                separator_label.add_css_class("heading")
+                separator_row.set_child(separator_label)
+                separator_row.set_activatable(False)
+                separator_row.set_selectable(False)
+                self.now_playing_info_list.append(separator_row)
+
+                # Resolution (if available)
+                if mon_name in monitor_map:
+                    mon = monitor_map[mon_name]
+                    self._add_now_playing_info_row("Resolution", f"{mon.width}x{mon.height}")
+
+                # File
+                if mon_status.file:
+                    file_basename = Path(mon_status.file).name
+                    self._add_now_playing_info_row("File", file_basename)
+
+                # Mode
+                self._add_now_playing_info_row("Mode", mon_status.mode or "auto")
+
+                # PID
+                if mon_status.pid:
+                    self._add_now_playing_info_row("PID", str(mon_status.pid))
+
+            # Global info from session
+            if sess:
+                separator_row = Gtk.ListBoxRow()
+                separator_label = Gtk.Label(label="Session Info")
+                separator_label.set_xalign(0)
+                separator_label.set_margin_top(8)
+                separator_label.set_margin_bottom(4)
+                separator_label.set_margin_start(12)
+                separator_label.set_margin_end(12)
+                separator_label.add_css_class("heading")
+                separator_row.set_child(separator_label)
+                separator_row.set_activatable(False)
+                separator_row.set_selectable(False)
+                self.now_playing_info_list.append(separator_row)
+
+                # Profile
+                profile = sess.last_profile if sess.last_profile else "unknown"
+                self._add_now_playing_info_row("Profile", profile)
+
+                # Codec
+                if sess.codec:
+                    self._add_now_playing_info_row("Codec", sess.codec)
+
+                # Encoder
+                if sess.encoder:
+                    self._add_now_playing_info_row("Encoder", sess.encoder)
+
+                # Auto-power
+                auto_power_text = "Yes" if sess.auto_power else "No"
+                self._add_now_playing_info_row("Auto-power", auto_power_text)
+
+    def _add_now_playing_info_row(self, label: str, value: str):
+        """Add a key-value row to the Now Playing info list"""
+        if not self.now_playing_info_list:
+            return
+
+        row = Gtk.ListBoxRow()
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        box.set_margin_top(8)
+        box.set_margin_bottom(8)
+        box.set_margin_start(12)
+        box.set_margin_end(12)
+
+        # Label (key)
+        key_label = Gtk.Label(label=label + ":")
+        key_label.set_xalign(0)
+        key_label.set_width_chars(15)
+        key_label.add_css_class("dim-label")
+        box.append(key_label)
+
+        # Value
+        value_label = Gtk.Label(label=value)
+        value_label.set_xalign(0)
+        value_label.set_hexpand(True)
+        value_label.set_wrap(True)
+        value_label.set_selectable(True)
+        box.append(value_label)
+
+        row.set_child(box)
+        row.set_activatable(False)
+        row.set_selectable(False)
+        self.now_playing_info_list.append(row)
+
