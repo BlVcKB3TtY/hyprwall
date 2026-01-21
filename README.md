@@ -25,6 +25,13 @@
 
 ---
 
+## Demo
+Short demo showing animated wallpapers and the performance panel in action.
+
+https://github.com/user-attachments/assets/fc55dd6c-3f58-419b-aade-62207ffe253e
+
+---
+
 ## Quick Start
 
 ### Installation
