@@ -1,5 +1,7 @@
 """
-GUI controllers that connect UI components to core business logic.
+GUI Controllers for hyprwall.
 """
 
-__all__ = []
+from .library_controller import LibraryController
+
+__all__ = ["LibraryController"]

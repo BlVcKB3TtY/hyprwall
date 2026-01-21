@@ -2,9 +2,6 @@
 Main window for hyprwall GTK4 application.
 """
 
-import hashlib
-import subprocess
-import time
 from pathlib import Path
 
 try:
@@ -18,104 +15,12 @@ except (ImportError, ValueError) as e:
     raise RuntimeError("GTK4 or libadwaita not available") from e
 
 from hyprwall.core.api import HyprwallCore
-
-
+from hyprwall.gui.utils.thumbnails import _ensure_video_thumb
+from hyprwall.gui.utils.images import _make_picture_from_file
+from hyprwall.gui.controllers.library_controller import LibraryController
 # Feature flag: Set to False to use synchronous loading (baseline for debugging layout issues)
 LAZY_LIBRARY_LOADING = False
 
-
-def _thumb_cache_dir() -> Path:
-    """Get the thumbnail cache directory"""
-    cache_dir = Path.home() / ".cache" / "hyprwall" / "thumbs"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir
-
-
-def _thumb_key(path: Path, width: int, height: int) -> str:
-    """Generate a unique cache key for a thumbnail based on path, mtime, and size"""
-    try:
-        stat = path.stat()
-        data = f"{path}:{stat.st_mtime}:{stat.st_size}:{width}x{height}"
-        return hashlib.sha256(data.encode()).hexdigest()[:16]
-    except Exception:
-        # Fallback if stat fails
-        data = f"{path}:{width}x{height}"
-        return hashlib.sha256(data.encode()).hexdigest()[:16]
-
-
-def _ensure_video_thumb(video_path: Path, width: int, height: int) -> Path | None:
-    """
-    Generate a video thumbnail using ffmpeg if not cached.
-    Returns the path to the thumbnail PNG, or None on failure.
-    """
-    cache_dir = _thumb_cache_dir()
-    thumb_key = _thumb_key(video_path, width, height)
-    thumb_path = cache_dir / f"{thumb_key}.png"
-
-    # Return cached thumbnail if it exists
-    if thumb_path.exists():
-        return thumb_path
-
-    # Check if ffmpeg is available
-    try:
-        subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True, timeout=2)
-    except Exception:
-        return None
-
-    # Extract frame at 1 second using ffmpeg
-    try:
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-ss", "00:00:01",
-            "-i", str(video_path),
-            "-frames:v", "1",
-            "-vf", f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}",
-            str(thumb_path),
-        ]
-
-        subprocess.run(
-            cmd,
-            capture_output=True,
-            timeout=5,
-            check=False,
-            text=False,
-        )
-
-        # Verify thumbnail was created
-        if thumb_path.exists() and thumb_path.stat().st_size > 0:
-            return thumb_path
-        else:
-            return None
-
-    except Exception:
-        return None
-
-
-def _make_picture_from_file(file_path: Path, width: int, height: int, cover: bool = True) -> Gtk.Picture | None:
-    """
-    Create a Gtk.Picture from an image file with proper scaling.
-    Returns None on failure.
-    """
-    try:
-        pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
-            str(file_path),
-            width=width,
-            height=height,
-            preserve_aspect_ratio=True
-        )
-        texture = Gdk.Texture.new_for_pixbuf(pixbuf)
-        picture = Gtk.Picture.new_for_paintable(texture)
-
-        if cover:
-            picture.set_content_fit(Gtk.ContentFit.COVER)
-        else:
-            picture.set_content_fit(Gtk.ContentFit.CONTAIN)
-
-        picture.set_can_shrink(True)
-        return picture
-    except Exception:
-        return None
 
 
 class HyprwallWindow(Adw.ApplicationWindow):
@@ -139,8 +44,18 @@ class HyprwallWindow(Adw.ApplicationWindow):
         else:
             self._build_ui_programmatically()
 
+        # Library controller (GUI delegates; no core calls from window for library)
+        self.library_controller = LibraryController(self, self.core, lazy_loading=LAZY_LIBRARY_LOADING)
+
+        # Auto-load default library directory at startup (after controller creation)
+        self._auto_load_default_library()
+
         # Load initial status
         self._refresh_status()
+
+        # Initialize Now Playing view (in case wallpaper is already running)
+        if hasattr(self, '_refresh_now_playing'):
+            GLib.idle_add(self._refresh_now_playing)
 
     def _load_from_ui(self, ui_path: Path):
         """Load the UI from a .ui file using GtkBuilder"""
@@ -164,10 +79,14 @@ class HyprwallWindow(Adw.ApplicationWindow):
         self.library_container = builder.get_object("library_container")
         self.library_outer_stack = builder.get_object("library_outer_stack")
         self.library_stack = builder.get_object("library_stack")
-        self.library_list = builder.get_object("library_list")
         self.library_grid = builder.get_object("library_grid")
-        self.library_scroll_list = builder.get_object("library_scroll_list")
         self.library_scroll_grid = builder.get_object("library_scroll_grid")
+        self.library_search_entry = builder.get_object("library_search_entry")
+        self.library_search_results_label = builder.get_object("library_search_results_label")
+        self.library_search_list = builder.get_object("library_search_list")
+        self.library_scroll_search = builder.get_object("library_scroll_search")
+        self.library_search_preview_container = builder.get_object("library_search_preview_container")
+        self.library_search_preview_box = builder.get_object("library_search_preview_box")
         self.single_file_preview_box = builder.get_object("single_file_preview_box")
         self.single_file_view_stack = builder.get_object("single_file_view_stack")
         self.single_file_list = builder.get_object("single_file_list")
@@ -178,15 +97,17 @@ class HyprwallWindow(Adw.ApplicationWindow):
         self.now_playing_info_list = builder.get_object("now_playing_info_list")
         self.now_playing_empty_state = builder.get_object("now_playing_empty_state")
 
+        # Performance monitoring
+        self.perf_toggle = builder.get_object("perf_toggle")
+        self.perf_widget_container = builder.get_object("perf_widget_container")
+        self.perf_widget = None  # Will be created on demand
+
         # Pagination
         self.pagination_bar = builder.get_object("pagination_bar")
         self.page_prev = builder.get_object("page_prev")
         self.page_next = builder.get_object("page_next")
         self.page_label = builder.get_object("page_label")
 
-        # View mode toggles
-        self.view_mode_gallery = builder.get_object("view_mode_gallery")
-        self.view_mode_list = builder.get_object("view_mode_list")
 
         # Controls
         self.mode_dropdown = builder.get_object("mode_dropdown")
@@ -204,6 +125,11 @@ class HyprwallWindow(Adw.ApplicationWindow):
         self._page_size = 15
         self._page_index = 0
         self._total_pages = 1
+
+        # Search state
+        self._all_search_items = []  # All items loaded for search (no pagination)
+        self._filtered_search_items = []  # Filtered results based on search query
+        self._search_loaded = False  # Whether we've loaded all items for search
 
         # Now Playing refresh timer ID
         self._now_playing_timer = None
@@ -249,20 +175,25 @@ class HyprwallWindow(Adw.ApplicationWindow):
             self.file_chooser_button.connect("clicked", self._on_choose_file)
         if self.folder_chooser_button:
             self.folder_chooser_button.connect("clicked", self._on_choose_folder)
-        if self.library_list:
-            self.library_list.connect("row-activated", self._on_library_list_activated)
         if self.library_grid:
             self.library_grid.connect("child-activated", self._on_library_grid_activated)
 
-        # View mode toggle
-        if self.view_mode_gallery:
-            self.view_mode_gallery.connect("toggled", self._on_view_mode_changed)
-        if self.view_mode_list:
-            self.view_mode_list.connect("toggled", self._on_view_mode_changed)
+        # Library search
+        if hasattr(self, 'library_search_entry') and self.library_search_entry:
+            self.library_search_entry.connect("search-changed", self._on_library_search_changed)
+        if hasattr(self, 'library_search_list') and self.library_search_list:
+            self.library_search_list.connect("row-activated", self._on_library_search_activated)
 
         # Main view stack - refresh Now Playing when switched to
         if self.main_view_stack:
             self.main_view_stack.connect("notify::visible-child-name", self._on_main_view_changed)
+
+        # Performance toggle
+        if hasattr(self, 'perf_toggle') and self.perf_toggle:
+            self.perf_toggle.connect("notify::active", self._on_perf_toggle)
+            # If toggle is active by default, initialize the widget
+            if self.perf_toggle.get_active():
+                self._on_perf_toggle(self.perf_toggle, None)
 
         # Pagination
         if hasattr(self, 'page_prev') and self.page_prev:
@@ -297,12 +228,7 @@ class HyprwallWindow(Adw.ApplicationWindow):
         if self.library_container:
             self.library_container.set_size_request(-1, 300)  # Minimum height for library
 
-        # Auto-load default library directory at startup
-        self._auto_load_default_library()
-
-        # Initialize Now Playing view (in case wallpaper is already running)
-        if hasattr(self, '_refresh_now_playing'):
-            GLib.idle_add(self._refresh_now_playing)
+        # Note: Auto-load default library is now called in __init__ after controller creation
 
     def _freeze_window_size(self):
         """Freeze window size to prevent repositioning during content changes"""
@@ -723,527 +649,90 @@ class HyprwallWindow(Adw.ApplicationWindow):
 
                 # Load library from this folder (switches to library view)
                 self._load_library(folder_path)
+        except GLib.Error:
+            # User cancelled the dialog - this is normal, don't show error
+            pass
         except Exception as e:
             self._show_error(f"Folder selection error: {e!r}")
 
+    # ===== Library (delegated) =====
+
     def _load_library(self, folder: Path):
-        """Load media library - synchronous or lazy depending on LAZY_LIBRARY_LOADING flag"""
-        # Cancel any ongoing scan
-        if hasattr(self, '_scan_cancelled'):
-            self._scan_cancelled = True
-
-        # Store folder
-        self._library_folder = folder
-        self._library_items = []
-
-        # KEEP library container visible to avoid layout jump
-        if self.library_container:
-            self.library_container.set_visible(True)
-
-        # Show loading page (spinner + message)
-        if hasattr(self, 'library_outer_stack') and self.library_outer_stack:
-            self.library_outer_stack.set_visible_child_name("loading")
-
-        if LAZY_LIBRARY_LOADING:
-            # === LAZY MODE (background thread) ===
-            # Freeze window size to prevent Wayland recentering
-            self._freeze_window_size()
-
-            # Start progressive scan in background
-            self._scan_cancelled = False
-            import threading
-            thread = threading.Thread(
-                target=self._scan_library_thread,
-                args=(folder,),
-                daemon=True
-            )
-            thread.start()
-        else:
-            # === SYNCHRONOUS MODE (baseline for debugging) ===
-            # Freeze window size to prevent repositioning
-            self._freeze_window_size()
-
-            # Load all items synchronously (blocking, but no thread)
-            items = self.core.list_library(folder, recursive=True)
-
-            # Store all items for pagination
-            self._all_items = items
-            self._page_index = 0
-
-            # Calculate total pages
-            import math
-            self._total_pages = max(1, math.ceil(len(self._all_items) / self._page_size))
-
-            # Render first page
-            self._render_current_page()
-
-            # Show content page (gallery/list)
-            if hasattr(self, 'library_outer_stack') and self.library_outer_stack:
-                self.library_outer_stack.set_visible_child_name("content")
-
-            # Unfreeze window
-            self._unfreeze_window_size()
-
-            # Update status
-            self._reset_status()
+        return self.library_controller._load_library(folder)
 
     def _scan_library_thread(self, folder: Path):
-        """Background thread for scanning library (calls core API only)"""
-        try:
-            all_items = []
-
-            # Iterate over batches from core API and accumulate
-            for batch in self.core.iter_library(folder, recursive=True, batch_size=50):
-                # Check if scan was cancelled
-                if self._scan_cancelled:
-                    return
-
-                # Accumulate items instead of rendering immediately
-                all_items.extend(batch)
-
-            # Signal completion with all items at once
-            if not self._scan_cancelled:
-                GLib.idle_add(self._on_library_scan_complete_with_items, all_items)
-
-        except Exception as e:
-            GLib.idle_add(self._unfreeze_window_size)
-            GLib.idle_add(self._show_error, f"Library scan error: {e}")
-            GLib.idle_add(self._reset_status)
+        return self.library_controller._scan_library_thread(folder)
 
     def _append_library_batch(self, batch):
-        """Append a batch of items to both views (called from idle_add)"""
-        # Remove loading placeholder on first batch
-        if not self._library_items:
-            self._clear_loading_placeholder()
-
-        self._library_items.extend(batch)
-
-        # Append to list view
-        for item in batch:
-            self._append_to_list_view(item)
-
-        # Append to grid view
-        for item in batch:
-            self._append_to_grid_view(item)
-
-        return False  # Don't repeat
+        return self.library_controller._append_library_batch(batch)
 
     def _on_library_scan_complete_with_items(self, items):
-        """Called when library scan completes - setup pagination and render first page"""
-        # Store all items for pagination
-        self._all_items = items
-        self._page_index = 0
-
-        # Calculate total pages
-        import math
-        self._total_pages = max(1, math.ceil(len(self._all_items) / self._page_size))
-
-        # Render first page
-        self._render_current_page()
-
-        # Show content page (switch from loading to gallery/list)
-        if hasattr(self, 'library_outer_stack') and self.library_outer_stack:
-            self.library_outer_stack.set_visible_child_name("content")
-
-        # Unfreeze window size (allow normal resizing)
-        self._unfreeze_window_size()
-
-        # Reset status
-        self._reset_status()
-
-        return False  # Don't repeat
+        return self.library_controller._on_library_scan_complete_with_items(items)
 
     def _render_current_page(self):
-        """Render only the current page of items (pagination)"""
-        # Clear views first
-        self._clear_library_views()
-
-        if not self._all_items:
-            # Show "no media found" message
-            self._show_no_media_message()
-            # Hide pagination bar
-            if hasattr(self, 'pagination_bar') and self.pagination_bar:
-                self.pagination_bar.set_visible(False)
-            return
-
-        # Calculate slice for current page
-        start_idx = self._page_index * self._page_size
-        end_idx = min(start_idx + self._page_size, len(self._all_items))
-        page_items = self._all_items[start_idx:end_idx]
-
-        # Store current page items for compatibility
-        self._library_items = page_items
-
-        # Render only the current page items
-        self._render_list_view(page_items)
-        self._render_grid_view(page_items)
-
-        # Update pagination UI
-        self._update_pagination_ui()
+        return self.library_controller._render_current_page()
 
     def _update_pagination_ui(self):
-        """Update pagination bar state (label + button sensitivity)"""
-        if not hasattr(self, 'pagination_bar') or not self.pagination_bar:
-            return
-
-        # Show pagination bar if more than one page
-        if self._total_pages > 1:
-            self.pagination_bar.set_visible(True)
-        else:
-            self.pagination_bar.set_visible(False)
-            return
-
-        # Update label
-        if hasattr(self, 'page_label') and self.page_label:
-            current_page = self._page_index + 1  # 1-based for display
-            self.page_label.set_label(f"Page {current_page} / {self._total_pages}")
-
-        # Update button sensitivity
-        if hasattr(self, 'page_prev') and self.page_prev:
-            self.page_prev.set_sensitive(self._page_index > 0)
-
-        if hasattr(self, 'page_next') and self.page_next:
-            self.page_next.set_sensitive(self._page_index < self._total_pages - 1)
+        return self.library_controller._update_pagination_ui()
 
     def _on_page_prev(self, button):
-        """Navigate to previous page"""
-        if self._page_index > 0:
-            self._page_index -= 1
-            self._render_current_page()
+        return self.library_controller._on_page_prev(button)
 
     def _on_page_next(self, button):
-        """Navigate to next page"""
-        if self._page_index < self._total_pages - 1:
-            self._page_index += 1
-            self._render_current_page()
+        return self.library_controller._on_page_next(button)
 
-    def _reset_status(self):
-        """Reset status - refresh Now Playing if visible"""
-        self._refresh_status()
-        return False
+    def _on_library_search_changed(self, entry):
+        return self.library_controller._on_library_search_changed(entry)
+
+    def _load_all_for_search(self):
+        return self.library_controller._load_all_for_search()
+
+    def _render_library_search_results(self, items):
+        return self.library_controller._render_library_search_results(items)
+
+    def _on_library_search_activated(self, listbox, row):
+        return self.library_controller._on_library_search_activated(listbox, row)
+
+    def _show_library_search_preview(self, file_path: Path, media_item=None):
+        return self.library_controller._show_library_search_preview(file_path, media_item)
 
     def _on_library_scan_complete(self):
-        """Called when library scan completes"""
-        # Clear loading placeholder
-        self._clear_loading_placeholder()
-
-        # If no items found, show message
-        if not self._library_items:
-            self._show_no_media_message()
-
-        return False  # Don't repeat
-
-    def _clear_library_views(self):
-        """Clear both list and grid views"""
-        # Clear list view
-        while True:
-            row = self.library_list.get_row_at_index(0)
-            if row is None:
-                break
-            self.library_list.remove(row)
-
-        # Clear grid view
-        self.library_grid.remove_all()
+        return self.library_controller._on_library_scan_complete()
 
     def _show_loading_placeholder(self):
-        """Show 'Loading...' placeholder in both views"""
-        # Clear first to ensure clean state
-        self._clear_library_views()
-
-        # List view placeholder
-        label = Gtk.Label(label="Loading wallpapers...")
-        label.add_css_class("dim-label")
-        label.set_margin_top(12)
-        label.set_margin_bottom(12)
-
-        row = Gtk.ListBoxRow()
-        row.set_child(label)
-        row.set_activatable(False)
-        row.set_selectable(False)
-        row.set_name("loading-placeholder")  # Mark for removal
-        self.library_list.append(row)
-
-        # Grid view placeholder - centered to avoid layout distortion
-        label_grid = Gtk.Label(label="Loading wallpapers...")
-        label_grid.add_css_class("dim-label")
-        label_grid.set_halign(Gtk.Align.CENTER)
-        label_grid.set_valign(Gtk.Align.CENTER)
-        label_grid.set_hexpand(True)
-        label_grid.set_vexpand(True)
-
-        child = Gtk.FlowBoxChild()
-        child.set_child(label_grid)
-        child.set_can_focus(False)
-        child.set_name("loading-placeholder")  # Mark for removal
-        self.library_grid.append(child)
+        return self.library_controller._show_loading_placeholder()
 
     def _clear_loading_placeholder(self):
-        """Remove loading placeholder from both views"""
-        # Clear list view placeholder
-        idx = 0
-        while True:
-            row = self.library_list.get_row_at_index(idx)
-            if row is None:
-                break
-            if row.get_name() == "loading-placeholder":
-                self.library_list.remove(row)
-                break  # Only one placeholder
-            idx += 1
-
-        # Clear grid view placeholder (FlowBox) - GTK4 iteration
-        child = self.library_grid.get_first_child()
-        while child is not None:
-            next_child = child.get_next_sibling()
-            if isinstance(child, Gtk.FlowBoxChild) and child.get_name() == "loading-placeholder":
-                self.library_grid.remove(child)
-                break  # Only one placeholder
-            child = next_child
+        return self.library_controller._clear_loading_placeholder()
 
     def _show_no_media_message(self):
-        """Show 'no media found' message in both views"""
-        # List view
-        label = Gtk.Label(label="No media files found")
-        label.add_css_class("dim-label")
-        row = Gtk.ListBoxRow()
-        row.set_child(label)
-        row.set_activatable(False)
-        row.set_selectable(False)
-        self.library_list.append(row)
-
-        # Grid view
-        label_grid = Gtk.Label(label="No media files found")
-        label_grid.add_css_class("dim-label")
-        label_grid.set_margin_top(24)
-        label_grid.set_margin_bottom(24)
-        child = Gtk.FlowBoxChild()
-        child.set_child(label_grid)
-        child.set_can_focus(False)
-        self.library_grid.append(child)
-
-    def _render_list_view(self, items):
-        """Render list view with MediaItem list"""
-        # Clear existing items
-        while True:
-            row = self.library_list.get_row_at_index(0)
-            if row is None:
-                break
-            self.library_list.remove(row)
-
-        if not items:
-            # Show "no media found" message
-            label = Gtk.Label(label="No media files found")
-            label.add_css_class("dim-label")
-
-            row = Gtk.ListBoxRow()
-            row.set_child(label)
-            row.set_activatable(False)
-            row.set_selectable(False)
-            self.library_list.append(row)
-            return
-
-        # Populate list
-        for item in items:
-            # Create content box
-            content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            content.set_margin_top(6)
-            content.set_margin_bottom(6)
-            content.set_margin_start(12)
-            content.set_margin_end(12)
-
-            # Icon based on kind
-            icon_name = "video-x-generic-symbolic" if item.kind == "video" else "image-x-generic-symbolic"
-            icon = Gtk.Image.new_from_icon_name(icon_name)
-            content.append(icon)
-
-            # Filename
-            label = Gtk.Label(label=item.path.name)
-            label.set_xalign(0)
-            label.set_hexpand(True)
-            label.set_ellipsize(Pango.EllipsizeMode.END)
-            content.append(label)
-
-            # Create ListBoxRow and set content
-            row = Gtk.ListBoxRow()
-            row.set_child(content)
-
-            # Store path as Python attribute (not set_data)
-            row.media_path = item.path
-
-            self.library_list.append(row)
+        return self.library_controller._show_no_media_message()
 
     def _render_grid_view(self, items):
-        """Render gallery view (FlowBox) with MediaItem list"""
-        # Clear existing items
-        self.library_grid.remove_all()
-
-        if not items:
-            # Show "no media found" message
-            label = Gtk.Label(label="No media files found")
-            label.add_css_class("dim-label")
-            label.set_margin_top(24)
-            label.set_margin_bottom(24)
-
-            child = Gtk.FlowBoxChild()
-            child.set_child(label)
-            child.set_can_focus(False)
-            self.library_grid.append(child)
-            return
-
-        # Populate gallery
-        for item in items:
-            card = self._create_gallery_card(item)
-
-            child = Gtk.FlowBoxChild()
-            child.set_child(card)
-
-            # Store path as Python attribute
-            child.media_path = item.path
-
-            self.library_grid.append(child)
+        return self.library_controller._render_grid_view(items)
 
     def _append_to_list_view(self, item):
-        """Append a single item to list view (for progressive loading)"""
-        # Create content box
-        content = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        content.set_margin_top(6)
-        content.set_margin_bottom(6)
-        content.set_margin_start(12)
-        content.set_margin_end(12)
-
-        # Icon based on kind
-        icon_name = "video-x-generic-symbolic" if item.kind == "video" else "image-x-generic-symbolic"
-        icon = Gtk.Image.new_from_icon_name(icon_name)
-        content.append(icon)
-
-        # Filename
-        label = Gtk.Label(label=item.path.name)
-        label.set_xalign(0)
-        label.set_hexpand(True)
-        label.set_ellipsize(Pango.EllipsizeMode.END)
-        content.append(label)
-
-        # Create ListBoxRow and set content
-        row = Gtk.ListBoxRow()
-        row.set_child(content)
-
-        # Store path as Python attribute
-        row.media_path = item.path
-
-        self.library_list.append(row)
+        return self.library_controller._append_to_list_view(item)
 
     def _append_to_grid_view(self, item):
-        """Append a single item to grid view (for progressive loading)"""
-        card = self._create_gallery_card(item)
-
-        child = Gtk.FlowBoxChild()
-        child.set_child(card)
-
-        # Store path as Python attribute
-        child.media_path = item.path
-
-        self.library_grid.append(child)
+        return self.library_controller._append_to_grid_view(item)
 
     def _create_gallery_card(self, item):
-        """Create a gallery card for a media item with proper thumbnails"""
-        # Main card container
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        card.add_css_class("wallpaper-card")
-
-        # 16:9 aspect ratio for better preview (Wallpaper Engine style)
-        thumb_width = 260
-        thumb_height = 146
-
-        # Thumbnail area
-        if item.kind == "image":
-            # Load image thumbnail using proper GdkPixbuf
-            thumb = _make_picture_from_file(item.path, thumb_width, thumb_height, cover=True)
-
-            if thumb:
-                thumb.set_size_request(thumb_width, thumb_height)
-                thumb.add_css_class("wallpaper-thumb")
-                card.append(thumb)
-            else:
-                # Fallback to icon if image loading fails
-                icon_box = self._create_fallback_icon("image-x-generic-symbolic", thumb_width, thumb_height)
-                card.append(icon_box)
-        else:
-            # Video - try to generate/load thumbnail
-            thumb_path = _ensure_video_thumb(item.path, thumb_width, thumb_height)
-
-            if thumb_path:
-                # Successfully generated/cached thumbnail
-                thumb = _make_picture_from_file(thumb_path, thumb_width, thumb_height, cover=True)
-
-                if thumb:
-                    thumb.set_size_request(thumb_width, thumb_height)
-                    thumb.add_css_class("wallpaper-thumb")
-                    card.append(thumb)
-                else:
-                    # Thumbnail exists but couldn't be loaded
-                    icon_box = self._create_fallback_icon("video-x-generic-symbolic", thumb_width, thumb_height)
-                    card.append(icon_box)
-            else:
-                # Fallback to icon if ffmpeg unavailable or extraction failed
-                icon_box = self._create_fallback_icon("video-x-generic-symbolic", thumb_width, thumb_height)
-                card.append(icon_box)
-
-        # Filename label
-        label = Gtk.Label(label=item.path.name)
-        label.set_xalign(0.5)
-        label.set_ellipsize(Pango.EllipsizeMode.END)
-        label.set_max_width_chars(20)
-        label.add_css_class("wallpaper-title")
-        card.append(label)
-
-        return card
+        return self.library_controller._create_gallery_card(item)
 
     def _create_fallback_icon(self, icon_name: str, width: int, height: int) -> Gtk.Box:
-        """Create a fallback icon box for when thumbnail generation fails"""
-        icon_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        icon_box.set_valign(Gtk.Align.CENTER)
-        icon_box.set_halign(Gtk.Align.CENTER)
-        icon_box.set_size_request(width, height)
-        icon_box.add_css_class("wallpaper-thumb")
-
-        icon = Gtk.Image.new_from_icon_name(icon_name)
-        icon.set_pixel_size(48)
-        icon_box.append(icon)
-
-        return icon_box
-
-    def _on_view_mode_changed(self, button):
-        """Handle view mode toggle (both folder library and single file)"""
-        if not button.get_active():
-            return
-
-        if button == self.view_mode_gallery:
-            # Switch folder library to gallery
-            if hasattr(self, 'library_stack') and self.library_stack:
-                self.library_stack.set_visible_child_name("gallery")
-            # Switch single file to gallery
-            if hasattr(self, 'single_file_view_stack') and self.single_file_view_stack:
-                self.single_file_view_stack.set_visible_child_name("gallery")
-        elif button == self.view_mode_list:
-            # Switch folder library to list
-            if hasattr(self, 'library_stack') and self.library_stack:
-                self.library_stack.set_visible_child_name("list")
-            # Switch single file to list
-            if hasattr(self, 'single_file_view_stack') and self.single_file_view_stack:
-                self.single_file_view_stack.set_visible_child_name("list")
-
-    def _on_library_list_activated(self, list_box, row):
-        """Handle library list item selection"""
-        media_path = getattr(row, "media_path", None)
-        if media_path:
-            self.selected_file = media_path
-            self._update_selected_label()
+        return self.library_controller._create_fallback_icon(icon_name, width, height)
 
     def _on_library_grid_activated(self, flow_box, child):
-        """Handle library grid item selection"""
-        media_path = getattr(child, "media_path", None)
-        if media_path:
-            self.selected_file = media_path
-            self._update_selected_label()
+        return self.library_controller._on_library_grid_activated(flow_box, child)
+
+    def _auto_load_default_library(self):
+        """Auto-load default library directory at startup (safe guard against early calls)"""
+        if not hasattr(self, "library_controller") or self.library_controller is None:
+            return
+        return self.library_controller._auto_load_default_library()
+
+    # ===== End Library (delegated) =====
 
     def _update_selected_label(self):
         """Update the selected file label"""
@@ -1387,50 +876,14 @@ class HyprwallWindow(Adw.ApplicationWindow):
         except Exception as e:
             self._show_error(f"Failed to clear cache: {e}")
 
-    def _auto_load_default_library(self):
-        """Auto-load the default library directory at startup (calls core API only)"""
-        try:
-            # Get default library directory from core
-            default_dir = self.core.get_default_library_dir()
-
-            # Load library from this directory
-            if default_dir and default_dir.exists() and default_dir.is_dir():
-                self._load_library(default_dir)
-        except Exception as e:
-            # Silently fail - user can manually choose folder
-            pass
-
     def _on_reset_default_folder(self, action, param):
         """Reset the default library folder to intelligent fallback"""
-        try:
-            # Call core API - no business logic here
-            success = self.core.reset_default_library_dir()
-
-            if success:
-                # Get the new fallback directory
-                fallback_dir = self.core.get_default_library_dir()
-
-                message = (
-                    f"Default folder reset successfully!\n\n"
-                    f"Using fallback: {fallback_dir}"
-                )
-
-                dialog = Adw.MessageDialog.new(self, "Success", message)
-                dialog.add_response("ok", "OK")
-                dialog.present()
-
-                # Reload library from fallback
-                if fallback_dir and fallback_dir.exists():
-                    self._load_library(fallback_dir)
-            else:
-                self._show_error("Failed to reset default folder")
-        except Exception as e:
-            self._show_error(f"Failed to reset default folder: {e}")
+        return self.library_controller._on_reset_default_folder(action, param)
 
     # ===== NOW PLAYING VIEW =====
 
     def _on_main_view_changed(self, stack, param):
-        """Called when main view stack changes (Library <-> Now Playing)"""
+        """Called when main view stack changes (Library / Now Playing / Search)"""
         visible_child = stack.get_visible_child_name()
 
         if visible_child == "now_playing":
@@ -1446,6 +899,7 @@ class HyprwallWindow(Adw.ApplicationWindow):
             if self._now_playing_timer:
                 GLib.source_remove(self._now_playing_timer)
                 self._now_playing_timer = None
+
 
     def _refresh_now_playing_timer(self):
         """Timer callback for auto-refreshing Now Playing view"""
@@ -1468,6 +922,10 @@ class HyprwallWindow(Adw.ApplicationWindow):
                 self._show_now_playing_empty()
             else:
                 self._show_now_playing_content(status)
+
+            # Update performance monitoring if enabled
+            self._update_perf_monitoring()
+
         except Exception as e:
             self._show_now_playing_empty()
             return False
@@ -1668,3 +1126,71 @@ class HyprwallWindow(Adw.ApplicationWindow):
         row.set_selectable(False)
         self.now_playing_info_list.append(row)
 
+    # ===== PERFORMANCE MONITORING =====
+
+    def _on_perf_toggle(self, switch, param):
+        """Toggle performance widget visibility and monitoring"""
+        active = switch.get_active()
+
+        if active:
+            # Create widget if not exists
+            if self.perf_widget is None:
+                self._create_perf_widget()
+
+            # Show widget
+            if self.perf_widget:
+                self.perf_widget.set_visible(True)
+
+                # Start monitoring current wallpaper
+                self._update_perf_monitoring()
+        else:
+            # Hide and stop monitoring
+            if self.perf_widget:
+                self.perf_widget.set_visible(False)
+                self.perf_widget.set_pid(None)
+
+    def _create_perf_widget(self):
+        """Create the performance widget on demand"""
+        try:
+            from hyprwall.perf.widget import PerformanceWidget
+
+            self.perf_widget = PerformanceWidget()
+            self.perf_widget.set_visible(False)  # Hidden initially
+
+            # Add to container
+            if hasattr(self, 'perf_widget_container') and self.perf_widget_container:
+                self.perf_widget_container.append(self.perf_widget)
+
+        except ImportError as e:
+            # GTK or perf module not available
+            self._show_error(f"Performance monitoring not available: {e}")
+            self.perf_widget = None
+
+            # Disable toggle
+            if hasattr(self, 'perf_toggle') and self.perf_toggle:
+                self.perf_toggle.set_active(False)
+                self.perf_toggle.set_sensitive(False)
+
+    def _update_perf_monitoring(self):
+        """Update performance monitoring with current wallpaper PID"""
+        if not self.perf_widget or not self.perf_widget.get_visible():
+            return
+
+        try:
+            # Get status from core
+            status = self.core.get_status()
+
+            if status.running and status.monitors:
+                # Get PID from first monitor
+                first_monitor_status = next(iter(status.monitors.values()))
+                pid = first_monitor_status.pid
+
+                # Start monitoring this PID
+                self.perf_widget.set_pid(pid)
+            else:
+                # No wallpaper running
+                self.perf_widget.set_pid(None)
+
+        except Exception:
+            # Silently fail
+            self.perf_widget.set_pid(None)

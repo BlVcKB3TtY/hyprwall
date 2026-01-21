@@ -24,4 +24,5 @@ __all__ = [
     "power",
     "runner",
     "session",
+    "api"
 ]

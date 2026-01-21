@@ -1,5 +1,79 @@
 # Changelog
 
+## v0.7.0 (2026-01-19) - Performance Monitoring Module
+
+### Added
+- **Performance Monitoring Module** — Optional lightweight wallpaper performance tracking
+  - New `hyprwall.perf` module with backend monitoring and GTK widget
+  - Monitors CPU usage (process + children aggregation)
+  - Monitors RAM usage (RSS in MiB)
+  - GPU usage support (NVIDIA via nvidia-smi, AMD via sysfs)
+  - CPU and GPU temperature monitoring via hwmon
+  - Rolling average smoothing to avoid visual spikes
+  - Fail-safe design: never crashes, shows "N/A" for unavailable metrics
+  - Rate limiting: max 1 sample/second for minimal overhead
+  - Clean GTK widget with dashboard layout
+  - Full documentation in `hyprwall/perf/README.md`
+  - CLI test script: `python -m hyprwall.perf.test_monitor <pid>`
+  - Ready for GUI integration (toggle to show/hide)
+  - Performance impact: ~0.1% CPU, ~2-3 MiB RAM
+
+## v0.6.2 (2026-01-19) - Integrated Search & Cache Improvements
+
+### Added
+- **Integrated Search in Library** — Fast wallpaper search directly in Library view
+  - Search bar positioned next to "Library:" label
+  - Real-time filtering as you type
+  - Automatically switches to list view when searching (better performance)
+  - Returns to gallery view when search is cleared
+  - Match counter shows filtered/total count (e.g., "12 / 245")
+  - Optimized for large libraries (1000+ wallpapers)
+  - Loads all wallpapers once on first search, then filters in memory
+  - Clean UX: search integrated where it's needed, not hidden in a separate tab
+  - **Preview on selection** — Click any search result to see wallpaper preview
+    - Shows thumbnail for images (320x180)
+    - Shows extracted frame for videos (320x180)
+    - Preview appears above search results list
+    - Includes filename label
+    - Auto-hides when returning to gallery
+
+### Changed
+- **Simplified UI Navigation** — Removed separate Search tab
+  - Search is now part of Library view (more intuitive)
+  - Removed Gallery/List toggle (gallery is primary view)
+  - List view only appears during search (performance optimization)
+  - Cleaner interface with fewer toggles and tabs
+
+### Fixed
+- **Cache Clear Incomplete** — Now clears all cache types
+  - Fixed: `cache clear` now removes both video cache AND thumbnail cache
+  - Previously: only cleared `~/.cache/hyprwall/optimized` (videos)
+  - Now also clears: `~/.cache/hyprwall/thumbs` (thumbnails)
+  - Cache size statistics now include thumbnail cache
+  - Proper cleanup prevents orphaned thumbnail files
+- **Folder Dialog Cancel Error** — No more error popup on cancel
+  - Fixed: Canceling folder selection dialog no longer shows error
+  - Graceful handling of GLib.Error when user cancels
+  - Clean UX: silent cancellation as expected
+  - File chooser already handled cancellation correctly
+- **Pagination in Search Mode** — Pagination bar now hidden during search
+  - Prev/Next buttons automatically hidden when searching
+  - All search results displayed in scrollable list (no pagination needed)
+  - Pagination reappears when search is cleared and returning to gallery
+  - Cleaner UI during search operations
+- **Infinite Loader Bug** — Fixed library loading hang
+  - Removed references to deleted `library_list` widget
+  - Gallery pagination now renders correctly
+  - Library loads properly on startup
+
+### Technical
+- **Search Implementation**
+  - Search integrated in `library_stack` (switches between "gallery" and "search_results")
+  - Filter state managed in `_filtered_search_items`
+  - Search entry: `library_search_entry` (replaces old view mode toggle)
+  - Results list: `library_search_list` (separate from gallery grid)
+  - No separate view stack page, cleaner architecture
+
 ## v0.6.1 (2026-01-18) - Now Playing View & Enhanced Status
 
 ### Added

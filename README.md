@@ -18,8 +18,9 @@
 - **CLI & GUI** — Command-line or modern GTK4/libadwaita interface  
 - **Multi-Monitor** — Full Hyprland multi-monitor support
 - **Smart Optimization** — Auto-encode videos for performance
-- **Battery-Aware** — Automatic quality profiles (eco/balanced/quality)
+- **Battery-Aware** — Automatic quality profiles (eco_strict/eco/balanced/quality)
 - **Intelligent Caching** — Avoid redundant re-encoding
+- **Performance Monitoring** — Optional lightweight CPU/RAM/GPU/temperature tracking
 - **Clean & Predictable** — No bloat, just works
 
 ---
@@ -111,21 +112,21 @@ HyprWall GUI is meant to be launched as a desktop application from your applicat
 #### Features
 
 - **Library & Now Playing views** — Clean navigation between wallpaper browser and live status
+- **Integrated search** — Fast search bar in Library with real-time filtering (no pagination)
 - **File chooser** — Select individual wallpapers (images or videos)
 - **Folder browser** — Browse wallpaper collections with thumbnail gallery
 - **Video thumbnails** — Automatic preview generation for video files
 - **Pagination** — Gallery displays 15 items per page for smooth performance
 - **Loading screen** — Professional spinner during library scanning
 - **Single file preview** — Clear preview of individually selected files
-- **View modes** — Toggle between Gallery (thumbnails) and List (details) views
 - **Now Playing panel** — Real-time status showing currently active wallpapers with preview
 - **Live monitor detection** — Shows all connected displays with resolutions
 - **Mode selection** — Choose rendering mode (auto/fit/cover/stretch)
-- **Profile selection** — Set optimization profile (off/eco/balanced/quality)
+- **Profile selection** — Set optimization profile (off/eco/eco_strict/balanced/quality)
 - **Codec & Encoder** — Full control over video encoding (h264/vp9/av1, auto/cpu/nvenc/vaapi)
 - **Auto-power toggle** — Enable battery-aware automatic profile switching
 - **Session persistence** — Remembers your last wallpaper configuration
-- **Cache management** — View cache size and clear optimized files
+- **Cache management** — View cache size and clear optimized files (videos + thumbnails)
 - **Default library folder** — Automatically loads your wallpaper collection at startup
 
 #### Usage
@@ -134,9 +135,14 @@ HyprWall GUI is meant to be launched as a desktop application from your applicat
    - Click "Choose file..." to select a single wallpaper
    - OR click "Choose folder..." to browse a wallpaper library
    - The chosen folder becomes your default library (persisted)
-   - Use Gallery/List toggle to switch views
-   - Use Prev/Next buttons to navigate pages (if >15 items)
-   - Click any thumbnail to select that wallpaper
+   - **Gallery view** — Browse thumbnails with pagination (15 items per page)
+   - **Search** — Type in the search bar to filter wallpapers by name
+     - Switches to list view for better performance
+     - Real-time filtering as you type
+     - Shows match count (e.g., "12 / 245")
+     - Click any result to see preview (thumbnail appears above list)
+     - Best for large libraries (1000+ wallpapers)
+   - Click any thumbnail or search result to select that wallpaper
 
 2. **Configure options:**
    - **Mode:** How wallpaper fits the screen (auto/fit/cover/stretch)
@@ -160,9 +166,9 @@ HyprWall GUI is meant to be launched as a desktop application from your applicat
    - Menu → Cache Size (shows statistics)
    - Menu → Clear Cache (removes optimized files)
    - Menu → Reset Default Folder (clears saved library path)
-   - Menu → Reset Default Folder (clears saved library path)
 
 **Important:** Wallpapers always apply to all monitors (global-only mode). There is no per-monitor selection.
+
 ---
 
 ## Architecture

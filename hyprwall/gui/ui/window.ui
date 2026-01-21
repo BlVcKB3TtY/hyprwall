@@ -1,13 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Fichier UI pour la fenêtre principale de HyprWall
-  À éditer avec Cambalache (https://flathub.org/apps/ar.xjuan.Cambalache)
+  UI File for HyprWall Manager
+  Cambalache (https://flathub.org/apps/ar.xjuan.Cambalache)
 -->
 <interface>
   <requires lib="gtk" version="4.0"/>
   <requires lib="libadwaita" version="1.0"/>
 
-  <!-- Exemple minimaliste - À personnaliser selon vos besoins -->
   <object class="GtkBox" id="window_content">
     <property name="orientation">vertical</property>
     <property name="spacing">12</property>
@@ -144,40 +143,30 @@
         <child>
           <object class="GtkBox">
             <property name="orientation">horizontal</property>
-            <property name="spacing">6</property>
+            <property name="spacing">12</property>
             <property name="margin-bottom">6</property>
 
             <child>
               <object class="GtkLabel">
                 <property name="label">Library:</property>
-                <property name="hexpand">true</property>
                 <property name="xalign">0</property>
               </object>
             </child>
 
             <child>
-              <object class="GtkBox">
-                <property name="orientation">horizontal</property>
-                <property name="spacing">3</property>
+              <object class="GtkSearchEntry" id="library_search_entry">
+                <property name="placeholder-text">Search wallpapers...</property>
+                <property name="hexpand">true</property>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkLabel" id="library_search_results_label">
+                <property name="label"></property>
+                <property name="xalign">0</property>
                 <style>
-                  <class name="linked"/>
+                  <class name="dim-label"/>
                 </style>
-
-                <child>
-                  <object class="GtkToggleButton" id="view_mode_gallery">
-                    <property name="label">Gallery</property>
-                    <property name="active">true</property>
-                    <property name="tooltip-text">Gallery view</property>
-                  </object>
-                </child>
-
-                <child>
-                  <object class="GtkToggleButton" id="view_mode_list">
-                    <property name="label">List</property>
-                    <property name="group">view_mode_gallery</property>
-                    <property name="tooltip-text">List view</property>
-                  </object>
-                </child>
               </object>
             </child>
           </object>
@@ -352,7 +341,7 @@
               </object>
             </child>
 
-            <!-- Content page (existing library_stack) -->
+            <!-- Content page (library gallery or search results) -->
             <child>
               <object class="GtkStackPage">
                 <property name="name">content</property>
@@ -362,6 +351,7 @@
                     <property name="hexpand">true</property>
                     <property name="transition-type">crossfade</property>
 
+            <!-- Gallery view -->
             <child>
               <object class="GtkStackPage">
                 <property name="name">gallery</property>
@@ -393,22 +383,60 @@
               </object>
             </child>
 
+            <!-- Search results (list view with preview) -->
             <child>
               <object class="GtkStackPage">
-                <property name="name">list</property>
+                <property name="name">search_results</property>
                 <property name="child">
-                  <object class="GtkScrolledWindow" id="library_scroll_list">
+                  <object class="GtkBox">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">8</property>
                     <property name="vexpand">true</property>
-                    <property name="hexpand">true</property>
-                    <property name="min-content-height">300</property>
-                    <property name="propagate-natural-height">false</property>
 
+                    <!-- Preview container (hidden by default) -->
                     <child>
-                      <object class="GtkListBox" id="library_list">
-                        <property name="selection-mode">single</property>
+                      <object class="GtkBox" id="library_search_preview_container">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">6</property>
+                        <property name="visible">false</property>
+                        <property name="halign">center</property>
+                        <property name="margin-start">12</property>
+                        <property name="margin-end">12</property>
+                        <property name="margin-top">6</property>
                         <style>
-                          <class name="boxed-list"/>
+                          <class name="card"/>
                         </style>
+
+                        <child>
+                          <object class="GtkBox" id="library_search_preview_box">
+                            <property name="orientation">vertical</property>
+                            <property name="spacing">6</property>
+                            <property name="halign">center</property>
+                            <property name="margin-start">12</property>
+                            <property name="margin-end">12</property>
+                            <property name="margin-top">12</property>
+                            <property name="margin-bottom">12</property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+
+                    <!-- Results list -->
+                    <child>
+                      <object class="GtkScrolledWindow" id="library_scroll_search">
+                        <property name="vexpand">true</property>
+                        <property name="hexpand">true</property>
+                        <property name="min-content-height">300</property>
+                        <property name="propagate-natural-height">false</property>
+
+                        <child>
+                          <object class="GtkListBox" id="library_search_list">
+                            <property name="selection-mode">single</property>
+                            <style>
+                              <class name="boxed-list"/>
+                            </style>
+                          </object>
+                        </child>
                       </object>
                     </child>
                   </object>
@@ -528,12 +556,44 @@
                             </child>
                           </object>
                         </child>
+
+                        <!-- Performance toggle -->
+                        <child>
+                          <object class="GtkBox">
+                            <property name="orientation">horizontal</property>
+                            <property name="spacing">12</property>
+                            <property name="halign">start</property>
+                            <property name="margin-top">12</property>
+
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="label">Show Performance</property>
+                                <property name="xalign">0</property>
+                              </object>
+                            </child>
+
+                            <child>
+                              <object class="GtkSwitch" id="perf_toggle">
+                                <property name="valign">center</property>
+                                <property name="active">true</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+
+                        <!-- Performance widget container (managed by code) -->
+                        <child>
+                          <object class="GtkBox" id="perf_widget_container">
+                            <property name="orientation">vertical</property>
+                          </object>
+                        </child>
                       </object>
                     </child>
                   </object>
                 </property>
               </object>
             </child>
+
           </object>
         </child>
       </object>

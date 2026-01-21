@@ -3,7 +3,9 @@ name = "hyprwall"
 version = "0.1.0"
 description = "Lightweight wallpaper optimizer for Hyprland"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "psutil>=5.9.0",
+]
 
 [project.optional-dependencies]
 gui = [

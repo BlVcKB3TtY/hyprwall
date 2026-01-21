@@ -478,7 +478,7 @@ class HyprwallCore:
 
     def clear_cache(self) -> dict:
         """
-        Clear the optimization cache.
+        Clear the optimization cache (videos) and thumbnail cache.
 
         Returns:
             Dictionary with result:
@@ -495,16 +495,35 @@ class HyprwallCore:
         dirs_before = stats_before["dirs"]
         bytes_before = stats_before["size_bytes"]
 
+        # Also count thumbs cache
+        thumbs_dir = Path.home() / ".cache" / "hyprwall" / "thumbs"
+        thumbs_bytes = 0
+        thumbs_files = 0
+        if thumbs_dir.exists():
+            for item in thumbs_dir.rglob("*"):
+                if item.is_file():
+                    try:
+                        thumbs_bytes += item.stat().st_size
+                        thumbs_files += 1
+                    except Exception:
+                        pass
+
         try:
+            # Clear optimized videos cache
             if paths.OPT_DIR.exists():
                 shutil.rmtree(paths.OPT_DIR)
                 paths.OPT_DIR.mkdir(parents=True, exist_ok=True)
 
+            # Clear thumbnails cache
+            if thumbs_dir.exists():
+                shutil.rmtree(thumbs_dir)
+                thumbs_dir.mkdir(parents=True, exist_ok=True)
+
             return {
                 "success": True,
-                "files_deleted": files_before,
+                "files_deleted": files_before + thumbs_files,
                 "dirs_deleted": dirs_before,
-                "bytes_freed": bytes_before,
+                "bytes_freed": bytes_before + thumbs_bytes,
             }
         except Exception as e:
             return {
